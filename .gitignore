@@ -24,5 +24,8 @@ desktop.ini
 .idea/
 *.swp
 
+# Local handoff notes (not published)
+HANDOFF.md
+
 # Claude Code local settings
 .claude/settings.local.json
