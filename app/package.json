@@ -1,0 +1,38 @@
+{
+  "name": "terrarium-desktop",
+  "productName": "Terrarium",
+  "version": "0.1.0",
+  "description": "Terrarium 하네스 데스크톱 앱 (관제탑 화면과 코디네이터 터미널, 계정 연결, 실행 폴더 설치, 진행 기록)",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/lib.test.mjs",
+    "dist": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "node-pty": "1.1.0"
+  },
+  "devDependencies": {
+    "electron": "45.2.2",
+    "electron-builder": "26.18.1"
+  },
+  "build": {
+    "appId": "dev.terrarium.desktop",
+    "productName": "Terrarium",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "preload.cjs", "lib/**", "renderer/**", "package.json"],
+    "npmRebuild": false,
+    "asarUnpack": ["node_modules/node-pty/**"],
+    "extraResources": [
+      { "from": "../harness", "to": "harness", "filter": ["**/*", "!test/**", "!e2e/scenarios/**"] },
+      { "from": "..", "to": "tower", "filter": ["index.html", "css/**", "js/**", "assets/**"] }
+    ],
+    "win": { "target": "nsis", "signAndEditExecutable": false },
+    "nsis": { "oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true }
+  }
+}

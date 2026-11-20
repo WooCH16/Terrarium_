@@ -1,0 +1,57 @@
+:root {
+  --bg: #f6f4ef; --panel: #ffffff; --ink: #1f2328; --muted: #6b6f76; --line: #e3dfd6;
+  --accent: #2f6f5e; --accent-ink: #ffffff; --ok: #2f7d4f; --bad: #b3261e; --warn: #9a6400; --info: #2c5d9b;
+  font-family: "Segoe UI", "Malgun Gothic", system-ui, sans-serif; font-size: 14px; color: var(--ink);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #17191c; --panel: #202328; --ink: #e8e6e1; --muted: #9aa0a6; --line: #33373d; --accent: #5fb39a; --accent-ink: #0d1411; --ok: #6cc28c; --bad: #ef8a80; --warn: #e0b45c; --info: #8ab4f0; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); }
+.top { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.brand { font-weight: 700; font-size: 16px; letter-spacing: .2px; }
+.brand .sub { font-weight: 400; color: var(--muted); margin-left: 6px; }
+.run-pick { color: var(--muted); display: flex; gap: 8px; align-items: center; }
+.tabs { display: flex; gap: 4px; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.tabs button { border: 0; background: none; padding: 10px 14px; color: var(--muted); border-bottom: 2px solid transparent; border-radius: 0; }
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+.tab { display: none; }
+.tab.active { display: block; }
+h2 { font-size: 18px; margin: 0 0 8px; display: flex; align-items: center; gap: 10px; }
+h3 { font-size: 14px; margin: 18px 0 8px; }
+.hint { color: var(--muted); margin: 0 0 12px; line-height: 1.5; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.col { display: flex; flex-direction: column; gap: 6px; }
+input, select, textarea { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; }
+input { min-width: 280px; }
+textarea { width: 100%; resize: vertical; }
+button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 7px 12px; border-radius: 6px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.small { padding: 3px 8px; font-size: 12px; font-weight: 400; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 10px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+pre.card { font-family: Consolas, "D2Coding", monospace; font-size: 12.5px; max-height: 340px; overflow: auto; }
+.muted { color: var(--muted); }
+.ok { color: var(--ok); }
+.bad { color: var(--bad); }
+.warn { color: var(--warn); }
+.checks { list-style: none; padding: 0; margin: 8px 0 0; }
+.checks li { padding: 4px 0; border-top: 1px solid var(--line); }
+.checks .mark { display: inline-block; min-width: 36px; font-weight: 600; }
+.checks .fix { color: var(--ink); margin-left: 40px; font-size: 13px; }
+.form { display: grid; gap: 10px; max-width: 640px; }
+.form label { display: grid; gap: 4px; color: var(--muted); }
+.key label { min-width: 300px; }
+.key input { min-width: 260px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; }
+.grid .card { white-space: normal; margin: 0; }
+.grid h3 { margin-top: 0; }
+.issue { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; border-top: 1px solid var(--line); }
+.issue.closed a { color: var(--muted); }
+.issue a { color: var(--ink); text-decoration: none; }
+.issue a:hover { text-decoration: underline; }
+.badge { font-size: 11.5px; padding: 1px 7px; border-radius: 10px; border: 1px solid currentColor; white-space: nowrap; }
+.badge.info { color: var(--info); } .badge.ok { color: var(--ok); } .badge.warn { color: var(--warn); } .badge.bad { color: var(--bad); } .badge.muted { color: var(--muted); }
+.line { font-family: Consolas, monospace; font-size: 12.5px; padding: 3px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }

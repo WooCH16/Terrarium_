@@ -198,8 +198,9 @@
     });
   });
 
-  // 880x600 무대를 창 크기에 맞춘다
+  // 880x600 무대를 창 크기에 맞춘다. 데스크톱 앱은 창의 확대 배율로 맞추므로 건너뛴다(터미널 칸 계산이 CSS zoom에서 어긋난다).
   function fit() {
+    if (window.terrarium) return;
     $('stage').style.zoom = Math.min(2, window.innerWidth / 880, window.innerHeight / 600);
   }
   window.addEventListener('resize', fit);

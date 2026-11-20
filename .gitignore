@@ -29,3 +29,4 @@ HANDOFF.md
 
 # Claude Code local settings
 .claude/settings.local.json
+harness/test/.cli-trap.log

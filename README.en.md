@@ -1,0 +1,109 @@
+# Terrarium
+
+[한국어](README.md)
+
+Terrarium is a personal harness that splits work across layered Claude Code agents. You talk to one agent only: the coordinator.
+
+| Role | What it does | Runs as |
+|---|---|---|
+| Coordinator | Talks with you, clarifies the request, splits work into GitHub issues, hands them off, checks results against the completion criteria, and reports back | A Claude Code session (the run folder's `CLAUDE.md`) |
+| Advisor | Reads the target project and writes a proposal for how to split the work. Advises only | A subagent of the coordinator |
+| Operator | Takes issues, hands them to workers, merges results, writes the result report | A separate Claude Code session |
+| Worker | Does the actual change, one git worktree per task | Pi (claude, gemini, or muse models) |
+| Reviewer | Allows or rejects proposals and result reports. Also routes each issue to a worker model, type, and difficulty | Jev (TypeSafe System One API). Jev judges; the scripts decide |
+
+Results flow upward: operator report → reviewer verdict → coordinator check against the criteria → report to you. The target project's `main` changes only after you decide to apply the results. See [docs/00-definition.md](docs/00-definition.md) (Korean) for the full definition.
+
+## Scope (v0)
+
+- **The protocol is Korean.** Role documents, issue templates, and verdict comments are in Korean, and the scripts parse that text (`harness/operator/protocol.mjs`). The coordinator answers in Korean.
+- **Tested on Windows only.** Other operating systems are untested.
+- **Accounts you need:** GitHub (`gh` logged in, a private designated repository), Claude Code (logged in), at least one worker model provider (for example Pi's Anthropic login or a Gemini API key), and a TypeSafe Jev key (`TYPESAFE_API_KEY`).
+- Read the [known limitations](docs/known-limitations.md) (Korean) first. Workers have no OS sandbox, and anyone using the same `gh` account can forge a verdict.
+
+## Two ways to use it: the app and the Claude CLI
+
+There are two ways to use the harness. Either way, the coordinator is the same interactive Claude Code session running in a run folder. It uses the same rules (`CLAUDE.md`) and the same hooks, so it does the same work. Only the window and the setup steps differ.
+
+| | App | Claude CLI |
+|---|---|---|
+| Where you talk to the coordinator | The ORCHESTRA pane of the app's control-tower screen | `claude` started in your own terminal |
+| Preflight check, run folder setup | Screens under the [설정] (Settings) menu | Run `preflight.mjs` and `setup.mjs` yourself |
+| API keys (`TYPESAFE_API_KEY`, `GEMINI_API_KEY`) | Kept in this computer's encrypted storage and passed to the coordinator as environment variables | `.env` at the repository root |
+| Checking progress | [설정 > 진행 기록] (issues, handoffs, verdicts; read-only) | GitHub issues and the record files in the run folder |
+| Good for | Installing and using it without a terminal | Changing or testing the harness, or not installing the app |
+
+Both need Node 22 or later, git, [GitHub CLI](https://cli.github.com/) (`gh auth login`), [Claude Code](https://claude.com/claude-code) (logged in), and Pi (`npm install -g @earendil-works/pi-coding-agent`, then `pi auth login anthropic` or similar). The designated repository must be private.
+
+You can open the same run folder from either one. To open a run folder made in the terminal, use **열기…** (Open) next to the run folder picker at the top of the app's settings window. Do not run two coordinators on one run folder at once: opening it in the app and the terminal together makes handoffs collide.
+
+### 1. App
+
+`app/` holds a Windows desktop app (ADR 0010, 0011). The main window is the control-tower screen, and the coordinator terminal opens in its ORCHESTRA pane. The tower's operator cards, team, total, and office views still show mock data.
+
+```bash
+cd app
+npm install
+npm start            # run in development
+npm run dist         # Windows installer: app/dist/Terrarium Setup <version>.exe
+```
+
+First use:
+
+1. **[설정 > 계정]** (Settings > Accounts): log in to Claude Code, GitHub, and Pi with the login buttons. Enter API keys, type the designated repository (`<owner>/<name>`), and press **사전 점검** (preflight check). The coordinator terminal opens only after this check passes.
+2. **[설정 > 실행 폴더 설치]** (Settings > Run folder setup): enter the designated repository, a run folder name, and the target project (a git folder with a `main` branch; leave empty for the sample memo program), then press **설치** (Install).
+3. **ORCHESTRA pane** in the main window: when the terminal appears, talk to the coordinator. The first time, Claude Code asks whether you trust the folder; choose **Yes**. Choosing "No" means the run folder's allow list does not apply.
+   - Esc interrupts a turn, and Claude Code commands such as `/compact` work as usual.
+   - When the coordinator exits, press Enter in the terminal to reopen the same conversation, or N for a new one.
+   - When you restart the app, it reopens the previous conversation for that run folder.
+
+The installer is not code-signed. If Windows shows "Windows protected your PC" on first launch, choose **More info → Run anyway**.
+
+### 2. Claude CLI
+
+Run the scripts in a terminal yourself, then start `claude` in the run folder and talk to the coordinator.
+
+```bash
+# 1. Keys: put them in .env at the repository root (not committed)
+#    TYPESAFE_API_KEY=...      (required, reviewer and routing)
+#    GEMINI_API_KEY=...        (when using the gemini worker)
+
+# 2. Create a private designated repository and run the preflight check
+gh repo create <owner>/harness-issues --private
+node harness/preflight.mjs --repo <owner>/harness-issues
+
+# 3. Set up a run folder (without a target project, the sample memo program is used)
+node harness/setup.mjs --run C:/Users/<you>/my-run --repo <owner>/harness-issues --project C:/path/to/your/git/project
+
+# 4. Run: start the coordinator in the run folder (same settings the app uses)
+cd C:/Users/<you>/my-run
+claude --setting-sources project,local --allowedTools "Bash Write Edit Read Glob Grep Agent TodoWrite Skill"
+#    To pick up where you left off, add --continue or --resume <session id> to the same command
+
+# 5. Check (after the run finishes)
+node harness/e2e/verify.mjs --run C:/Users/<you>/my-run --since <start time ISO>
+```
+
+`--project` clones your repository into the run folder and cuts its `origin`, so the harness never writes to your original repository. Use a separate designated repository for each target project. Details (folder trust prompt, the Muse public-content gate, tests) are in [harness/README.md](harness/README.md) (Korean).
+
+## Folders
+
+| Path | Contents |
+|---|---|
+| `harness/` | Harness code and role documents. `harness/coordinator.md` becomes the run folder's `CLAUDE.md` |
+| `app/` | Desktop app (Electron) |
+| `docs/` | Definition, designs, ADRs, checks and run records (`docs/checks/`) |
+| `index.html`, `css/`, `js/`, `assets/` | Control-tower screen. It is the app's main window; opened in a browser it runs on mock data (`js/terminal.js` only acts inside the app) |
+| `scripts/` | Test runner (`test.mjs`) and CI checks (`check.js`) |
+
+## Tests
+
+```bash
+node scripts/test.mjs --fast   # fast tests
+node scripts/test.mjs          # everything (a few minutes)
+node scripts/check.js          # CI checks
+```
+
+## License
+
+[MIT](LICENSE).

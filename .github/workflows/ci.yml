@@ -23,3 +23,24 @@ jobs:
           node-version: 24
       - name: Syntax and asset checks
         run: node scripts/check.js
+
+  harness-unit:
+    # 하네스 단위 시험. 하네스는 Windows 우선이라 ubuntu에서의 통과는 아직 확인하지 못했다.
+    # 플랫폼 때문에 건너뛴 시험은 node 시험 출력의 skipped 줄과 "# SKIP" 표시로 남는다.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Platform
+        run: |
+          echo "platform: $(uname -sr)"
+          node --version
+          git --version
+      # 빠른 시험과 오래 걸리는 통합 시험을 나눠 돌린다(이슈 #27). 실행 스크립트가 진짜 모델 CLI 대신 덫을 기본값으로 둔다.
+      - name: Harness fast tests
+        run: node scripts/test.mjs --fast
+      - name: Harness slow tests
+        run: node scripts/test.mjs --slow

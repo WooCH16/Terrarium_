@@ -24,7 +24,7 @@
 [data-team="sec"]    { --c: #A0A6AF; --lt: #C4C9D1; --idle-c: #6E737B; --idle-t: #C4C9D1; --bg: rgba(12, 12, 14, 0.97); --glow-w: rgba(160, 166, 175, 0.35); --glow-i: rgba(160, 166, 175, 0.1); --dim: #6E737B; --dim-bg: rgba(30, 30, 34, 0.9); }
 
 html, body { margin: 0; height: 100%; }
-body { background: var(--shell); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+body { background: var(--shell); display: flex; align-items: center; justify-content: flex-start; overflow: hidden; }
 * { box-sizing: border-box; }
 button { font: inherit; cursor: pointer; text-align: left; flex-shrink: 0; }
 button:focus-visible, input:focus-visible { outline: 2px solid #FFFFFF; outline-offset: 2px; }
@@ -190,3 +190,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid #FFFFFF; outline-
   .flow > path, .live, .c-work, .c-stand, .c-sit, .c-sleep, .zz, .scr { animation: none; }
   .chr { transition: none; }
 }
+
+/* 데스크톱 앱: ORCHESTRA 칸의 코디네이터 터미널(js/terminal.js) */
+.term { flex-grow: 1; min-height: 0; padding: 6px 4px 4px 10px; background: #000c03; }
+.term[hidden] { display: none; }
+.term .xterm-viewport { background-color: #000c03 !important; }
+.online.off { color: var(--grey); }
+.online.off .live { background: var(--grey); box-shadow: none; animation: none; }
+.chat.has-term .messages, .chat.has-term .chat-form { display: none; }

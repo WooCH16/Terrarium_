@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' file:; style-src 'self' 'unsafe-inline' file: https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'none'">
 <title>관제탑 메인</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -22,6 +23,8 @@
         <span class="online"><span class="live"></span>ONLINE</span>
       </header>
       <div id="messages" class="messages" aria-live="polite"></div>
+      <!-- 데스크톱 앱에서는 이 자리에 코디네이터 터미널이 뜬다(js/terminal.js) -->
+      <div id="term" class="term" hidden></div>
       <form id="chat-form" class="chat-form">
         <label for="orch-input">USER ›</label>
         <input id="orch-input" type="text" autocomplete="off" placeholder="예: 보안팀 일시정지 / 디자인 작업 시작">
@@ -103,5 +106,6 @@
 </main>
 <script src="js/api.js"></script>
 <script src="js/app.js"></script>
+<script src="js/terminal.js"></script>
 </body>
 </html>

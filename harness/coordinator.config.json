@@ -1,0 +1,15 @@
+{
+  "workerModels": ["claude", "gemini", "muse"],
+  "reworkLimitPerIssue": 2,
+  "blockedIssuesReportThreshold": 3,
+  "cancelledIssuesCleanupThreshold": 8,
+  "preferenceProposalAtRepeat": 3,
+  "advisorRevisionAfterReject": 1,
+  "lightCheck": { "maxFiles": 3, "maxReads": 3 },
+  "researchRetry": 1,
+  "researchResult": { "maxLines": 50, "maxTokens": 2000 },
+  "bigToolOutput": { "lines": 50, "tokens": 2000 },
+  "recentContextPercent": 10,
+  "preserveListPercent": 5,
+  "noResponseMinutes": 30
+}
