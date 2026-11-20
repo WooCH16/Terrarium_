@@ -34,10 +34,11 @@ export function writeBg(run, token, data) {
   }
 }
 
-export const lastWaitFile = (run) => `${fwd(run)}/handoffs/last-wait.json`;
+// record: 하달(run-operator)은 last-wait.json, 조사(run-research)는 last-wait-research.json. 조사는 하달 중에도 띄우므로 파일을 나눈다.
+export const lastWaitFile = (run, record = 'last-wait') => `${fwd(run)}/handoffs/${record}.json`;
 
-export function writeLastWait(run, data) {
-  const f = lastWaitFile(run);
+export function writeLastWait(run, record, data) {
+  const f = lastWaitFile(run, record);
   mkdirSync(`${fwd(run)}/handoffs`, { recursive: true });
   writeFileSync(`${f}.tmp`, JSON.stringify(data));
   renameSync(`${f}.tmp`, f);
@@ -95,7 +96,7 @@ export async function startAndWait({ run, harnessDir, entry, args, env = process
   writeBg(run, token, { done: false, pid: launcher.pid ?? null, startedAt });
   // 코디네이터가 띄운 하달·조사만 대기 번호를 고정 파일에 남긴다(record). 오퍼레이터가 부르는 run-worker도 같은 bg 폴더에 쓰므로,
   // "가장 최근 bg 파일"로 찾으면 워커의 번호를 잡는다(run-18 h7, 2026-11-20). Esc 뒤 코디네이터는 이 파일 하나만 읽는다.
-  if (record) writeLastWait(run, { token, script: basename(entry), args, startedAt });
+  if (record) writeLastWait(run, record, { token, script: basename(entry), args, startedAt });
   launcher.unref?.();
   return report(await waitFor(run, token, { waitMs: waitMsOf(env) }), { token, harnessDir, write });
 }

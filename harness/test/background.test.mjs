@@ -23,7 +23,7 @@ const main = async (argv, env, deps = {}) => {
   write('#7 | 막힘 | https://x/7 args=' + argv.join(' '));
   return 1;
 };
-process.exitCode = await cliEntry({ main, entry: fileURLToPath(import.meta.url), record: process.env.FAKE_RECORD === '1' });
+process.exitCode = await cliEntry({ main, entry: fileURLToPath(import.meta.url), record: process.env.FAKE_RECORD || false });
 `;
 
 function setup() {
@@ -65,7 +65,7 @@ test('run-18 h7: 코디네이터가 띄운 실행만 last-wait.json에 대기 �
   assert.equal(r1.status, 8, r1.stderr);
   assert.equal(existsSync(`${w.run}/handoffs/last-wait.json`), false);
   const c = setup();
-  const r2 = c.exec({ FAKE_SLEEP_MS: '2500', HARNESS_BG_WAIT_MS: '100', FAKE_RECORD: '1' });
+  const r2 = c.exec({ FAKE_SLEEP_MS: '2500', HARNESS_BG_WAIT_MS: '100', FAKE_RECORD: 'last-wait' });
   assert.equal(r2.status, 8, r2.stderr);
   const token = /대기 번호 ([0-9a-f]{12})/.exec(r2.stdout)[1];
   const last = JSON.parse(readFileSync(`${c.run}/handoffs/last-wait.json`, 'utf8'));
