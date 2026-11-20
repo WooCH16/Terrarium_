@@ -328,6 +328,9 @@ function decideSubagent(input, config, deps) {
   const toolInput = input.tool_input || {};
   if (who !== 'advisor') return deny(`알 수 없는 하위 에이전트(${who})는 도구를 쓸 수 없다`);
   if (tool === 'Read' || tool === 'Grep' || tool === 'Glob') return secretReadCheck(input, config, deps) ?? allow();
+  // 대화형 세션에서 하위 에이전트는 결과를 SubagentHandback으로 코디네이터에게 돌려준다. 막으면 어드바이저가 보고 없이 끝난다(run-18, 2026-11-20).
+  // 이 도구는 부모에게 글을 돌려줄 뿐 파일·명령·밖에 닿지 않는다.
+  if (tool === 'SubagentHandback') return allow();
   const inbox = reviewerInbox(config);
   if (tool === 'Write' || tool === 'Edit') {
     const file = toolInput.file_path;
@@ -342,7 +345,7 @@ function decideSubagent(input, config, deps) {
     if (advisorReviewerCommandOk(tokens, config, input.cwd, deps)) return allow();
     return deny(`advisor가 실행할 수 있는 명령은 node ${normPath(config.harnessDir)}/operator/run-reviewer.mjs --advice <${inbox}/ 바로 아래 파일> --advice-id <id> 하나뿐이다`);
   }
-  return deny(`advisor는 ${tool} 도구를 쓸 수 없다 (읽기 도구, 리뷰어 전용 폴더 안 Write·Edit, 조언 판정 명령만)`);
+  return deny(`advisor는 ${tool} 도구를 쓸 수 없다 (읽기 도구, 리뷰어 전용 폴더 안 Write·Edit, 조언 판정 명령, 결과 돌려주기만)`);
 }
 
 export function decide(input, config, deps) {

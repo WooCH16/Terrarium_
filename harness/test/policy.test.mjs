@@ -552,3 +552,9 @@ test('T2 사례 표 6: 코디네이터가 부를 수 있는 하위 에이전트�
     ['advisor가 worker 호출', ['advisor', 'worker'], 'deny'],
   ], ([who, target]) => decide(sub(who, 'Agent', { subagent_type: target, prompt: 'x' }), config, deps()));
 });
+
+test('advisor는 SubagentHandback으로 결과를 돌려줄 수 있다(대화형 세션). 다른 하위 에이전트와 SendMessage는 막는다', () => {
+  ok(adv('SubagentHandback', { result: '리뷰어 판정: 허용 | ...' }));
+  no(adv('SendMessage', { to: 'x', message: 'y' }));
+  no(decide(sub('other', 'SubagentHandback', {}), config, deps()));
+});

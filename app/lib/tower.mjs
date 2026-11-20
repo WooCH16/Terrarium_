@@ -25,10 +25,12 @@ function workerOf(num, issues, running) {
 
 function operatorOf(slot, h, issues) {
   const workers = h.issues.map((n) => workerOf(n, issues, h.running));
-  const state = h.running ? 'work' : h.stopped ? 'pause' : 'idle';
+  // 끝난 기록 없이 프로세스가 없어진 하달(Esc로 끊긴 것 등)은 눈에 띄게 일시정지로 둔다.
+  const state = h.running ? 'work' : (h.stopped || h.orphaned) ? 'pause' : 'idle';
   const log = [`${hhmm(h.startedAt)} · 하달 시작 (이슈 ${h.issues.map((n) => `#${n}`).join(', ') || '없음'})`];
   for (const w of workers) if (w.title) log.push(`${w.id} ${cut(w.title, 30)}`);
   if (h.stopped) log.push(`${hhmm(h.stoppedAt ?? h.endedAt)} · 멈춤(stop-operator)`);
+  else if (h.orphaned) log.push('끝난 기록 없이 프로세스가 없음(중간에 끊김). stop-operator로 정리하세요');
   else if (h.running) log.push('지금 · 도는 중');
   else log.push(`${hhmm(h.endedAt)} · 끝남`);
   return { id: slot, name: `하달 ${h.name}`, state, workers, log };

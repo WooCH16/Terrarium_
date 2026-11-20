@@ -115,7 +115,7 @@ async function refreshProgress() {
   h.replaceChildren();
   h.className = '';
   if (s.handoffs.length === 0) h.append(el('div', 'muted', '하달이 없습니다.'));
-  for (const x of s.handoffs) h.append(el('div', 'line', `${x.name}  ${x.mode ?? ''}  이슈 ${x.issues.map((n) => `#${n}`).join(', ') || '—'}  ${x.stopped ? '중단됨' : x.running ? '실행 중' : '끝남'}`));
+  for (const x of s.handoffs) h.append(el('div', 'line', `${x.name}  ${x.mode ?? ''}  이슈 ${x.issues.map((n) => `#${n}`).join(', ') || '—'}  ${x.stopped ? '중단됨' : x.running ? '실행 중' : x.orphaned ? '끊김(정리 필요)' : '끝남'}`));
   const a = $('pg-advice');
   a.replaceChildren();
   a.className = '';

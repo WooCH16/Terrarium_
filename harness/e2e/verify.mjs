@@ -137,7 +137,8 @@ const clone = config.issuesClone;
 const day = since.toISOString().slice(0, 10);
 const recordsPath = `${clone}/records/${projectName}.md`;
 const records = existsSync(recordsPath) ? readFileSync(recordsPath, 'utf8').split(/\r?\n/) : [];
-const lines = records.filter((l) => (/^- (\d{4}-\d{2}-\d{2})/.exec(l)?.[1] ?? '') >= day);
+// 줄 머리는 `- 날짜` 또는 `27. 날짜`(코디네이터 규칙은 목록 모양을 정하지 않는다. run-18에서 번호 목록으로 쓴 것이 걸렸다).
+const lines = records.filter((l) => (/^(?:-|\d+\.) (\d{4}-\d{2}-\d{2})/.exec(l)?.[1] ?? '') >= day);
 check(`records/${projectName}.md에 "전달 예정" 줄`, lines.some((l) => l.includes('전달 예정')));
 check(`records/${projectName}.md에 "최종 보고" 줄`, lines.some((l) => l.includes('최종 보고')));
 let ahead = '?';

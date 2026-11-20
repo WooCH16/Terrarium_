@@ -121,7 +121,7 @@ test('진행 표시: 이슈 상태 라벨, 하달, 조언 판정, 훅 거부를 
   writeFileSync(`${run}/guard.log`, `${JSON.stringify({ time: 't', agent_type: null, tool_name: 'Write', allow: false, reason: '대상 프로젝트' })}\n${JSON.stringify({ time: 't', agent_type: null, tool_name: 'Bash', allow: true })}\nbroken\n`);
   const calls = [];
   const gh = (args) => { calls.push(args); return JSON.stringify([{ number: 4, title: '정렬', state: 'OPEN', labels: [{ name: 'enhancement' }, { name: '리뷰대기' }], url: 'https://github.com/o/r/issues/4' }, { number: 3, title: 'x', state: 'CLOSED', labels: [], url: 'u' }]); };
-  const s = await readStatus(run, gh);
+  const s = await readStatus(run, gh, { alive: (p) => p === 9 });
   assert.deepEqual(calls[0].slice(0, 2), ['issue', 'list'], '이슈는 list로만 읽는다');
   assert.deepEqual(s.issues.map((i) => [i.number, i.label, i.open]), [[4, '리뷰대기', true], [3, '라벨 없음', false]]);
   assert.deepEqual(s.handoffs.map((h) => [h.name, h.running, h.stopped]), [['h2', true, false], ['h1', false, true]]);
@@ -155,7 +155,7 @@ test('관제탑: 최근 하달이 카드 자리에, 맡은 이슈가 워커로, 
   writeFileSync(`${run}/handoffs/h6/session.json`, JSON.stringify({ mode: 'work', issues: [6, 7], pid: 5, pids: [] }));
   writeFileSync(`${run}/handoffs/h5/stopped.json`, '{}');
   const gh = () => JSON.stringify([{ number: 6, title: '정렬', state: 'OPEN', labels: [{ name: '리뷰대기' }], url: 'u' }, { number: 7, title: 'x', state: 'OPEN', labels: [{ name: '막힘' }], url: 'u' }, { number: 2, title: 'y', state: 'CLOSED', labels: [{ name: '반영됨' }], url: 'u' }]);
-  const v = towerView(await readStatus(run, gh));
+  const v = towerView(await readStatus(run, gh, { alive: (p) => p === 5 }));
   assert.deepEqual(v.operators.map((o) => o.id), SLOTS, '자리 다섯 개는 그대로');
   assert.deepEqual(v.operators.map((o) => o.name), ['하달 h2', '하달 h3', '하달 h4', '하달 h5', '하달 h6'], '최근 다섯 개, 오래된 것이 왼쪽');
   assert.deepEqual(v.operators.map((o) => o.state), ['idle', 'idle', 'idle', 'pause', 'work'], '끝남=대기, 멈춤=일시정지, 오퍼레이터 pid가 있고 끝나지 않음=작업중');
@@ -166,4 +166,19 @@ test('관제탑: 최근 하달이 카드 자리에, 맡은 이슈가 워커로, 
   assert.match(few.operators[0].log.at(-1), /이슈를 못 읽음/);
   assert.deepEqual(towerView(null).operators.map((o) => o.name), Array(5).fill('빈 자리'));
   assert.match(towerView(null, '권한 없음').note, /권한 없음/);
+});
+
+test('하달: 끝난 시각이 없어도 적힌 프로세스가 다 죽었으면 도는 중이 아니라 orphaned(관제탑은 일시정지와 정리 안내)', async () => {
+  const run = tmp();
+  writeFileSync(`${run}/harness.json`, JSON.stringify({ designatedRepo: 'o/r' }));
+  mkdirSync(`${run}/handoffs/h1`, { recursive: true });
+  writeFileSync(`${run}/handoffs/h1/session.json`, JSON.stringify({ mode: 'work', issues: [1], pid: 111, driverPid: 222 }));
+  const gh = () => '[]';
+  const dead = await readStatus(run, gh, { alive: () => false });
+  assert.deepEqual([dead.handoffs[0].running, dead.handoffs[0].orphaned], [false, true]);
+  const card = towerView(dead).operators[0];
+  assert.equal(card.state, 'pause');
+  assert.match(card.log.at(-1), /stop-operator로 정리/);
+  const live = await readStatus(run, gh, { alive: (p) => p === 222 });
+  assert.deepEqual([live.handoffs[0].running, live.handoffs[0].orphaned], [true, false], '드라이버만 살아 있어도 도는 중');
 });

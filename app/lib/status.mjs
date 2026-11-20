@@ -25,13 +25,25 @@ export async function readIssues(cfg, ghExec) {
   })).sort((a, b) => b.number - a.number);
 }
 
-export function readHandoffs(run) {
+// pid가 살아 있는가(EPERM이면 남의 권한으로 살아 있음).
+export function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (e) { return e?.code === 'EPERM'; }
+}
+
+export function readHandoffs(run, alive = pidAlive) {
   const dir = `${run}/handoffs`;
   if (!existsSync(dir)) return [];
   return readdirSync(dir).filter((n) => /^h[1-9]\d*$/.test(n)).map((name) => {
     const d = `${dir}/${name}`;
     let session = null;
     try { session = JSON.parse(readFileSync(`${d}/session.json`, 'utf8')); } catch { /* 없음 */ }
+    // 끝난 시각이 없고 적힌 프로세스(오퍼레이터, 드라이버, 러너) 중 하나라도 살아 있어야 도는 중이다.
+    // 코디네이터가 하달 도중 Esc로 끊으면 하달 프로세스가 통째로 죽고 endedAt이 남지 않는다(run-18 h5). 그런 하달은 orphaned다.
+    const recorded = [session?.pid, session?.driverPid, ...(Array.isArray(session?.pids) ? session.pids : [])].filter((p) => p !== undefined && p !== null);
+    const open = Boolean(session) && !session.endedAt;
+    const stopped = existsSync(`${d}/stopped.json`);
+    const running = open && recorded.some((p) => alive(p));
     return {
       name,
       issues: session?.issues ?? [],
@@ -39,9 +51,9 @@ export function readHandoffs(run) {
       startedAt: session?.startedAt ?? null,
       endedAt: session?.endedAt ?? null,
       stoppedAt: session?.stoppedAt ?? null,
-      stopped: existsSync(`${d}/stopped.json`),
-      // 끝난 시각이 없고 오퍼레이터 pid나 러너 pid가 있으면 도는 중으로 본다.
-      running: !session?.endedAt && ((Array.isArray(session?.pids) && session.pids.length > 0) || (session?.pid !== undefined && session?.pid !== null)),
+      stopped,
+      running,
+      orphaned: open && !stopped && recorded.length > 0 && !running,
       modified: statSync(d).mtime.toISOString(),
     };
   }).sort((a, b) => Number(b.name.slice(1)) - Number(a.name.slice(1)));
@@ -57,10 +69,10 @@ export function readGuard(run, max = 200) {
   return { total: rows.length, denied };
 }
 
-export async function readStatus(run, ghExec) {
+export async function readStatus(run, ghExec, { alive } = {}) {
   const cfg = readRunConfig(run);
   let issues = [];
   let issuesError = null;
   try { issues = await readIssues(cfg, ghExec); } catch (e) { issuesError = String(e.message ?? e).slice(0, 300); }
-  return { repo: cfg.designatedRepo, project: cfg.projectName ?? 'memo', issues, issuesError, handoffs: readHandoffs(run), advice: readAdvice(run), guard: readGuard(run) };
+  return { repo: cfg.designatedRepo, project: cfg.projectName ?? 'memo', issues, issuesError, handoffs: readHandoffs(run, alive), advice: readAdvice(run), guard: readGuard(run) };
 }

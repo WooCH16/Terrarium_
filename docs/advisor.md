@@ -40,6 +40,7 @@
 
 - **모델:** 코디네이터와 같은 급(`model: inherit`). 분해가 틀리면 워커·리뷰어 비용이 전부 낭비되므로 여기서 아끼지 않는다.
 - **도구:** Read, Grep, Glob, Write, Bash. 훅이 쓰기는 `reviewer-inbox/`로, 명령은 `run-reviewer.mjs --advice` 한 모양으로 막는다(ADR 0006 결정 2).
+- **결과 돌려주기:** 대화형 세션에서는 하위 에이전트가 `SubagentHandback`으로 결과를 돌려준다. guard는 advisor에게 이 도구를 허용한다(run-18에서 막혀 "보고 없이 끝남"이 된 것을 고침). 파일·명령·밖에는 닿지 않는 도구다.
 - **시험용 대역:** `setup --advisor-stub`은 `harness/stubs/advisor-stub.md`를 대신 설치한다.
 
 ## 7. 한계

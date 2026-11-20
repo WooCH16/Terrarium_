@@ -36,10 +36,20 @@ ADR 0010은 앱에 새 화면 넷(계정·설치·대화·진행)을 만들고, 
 | 이어 열 대화가 없을 때 | `No conversation found` 뒤 새 id로 자동으로 다시 뜸(첫 시도에서 드러나 고침) |
 | 설치 파일 | `resources/tower`(관제탑 파일)와 `app.asar.unpacked/node_modules/node-pty/prebuilds`가 들어감 |
 
-미확인:
-- 설치본에서 터미널이 뜨는지
-- 하달 중 Esc를 눌렀을 때 어떻게 되는지(분리 실행된 하달은 일부러 남는다)
-- `/compact`와 `PreCompact` 훅(시나리오 10)
+미확인이던 것(아래 "확인 2"에서 확인함):
+- ~~설치본에서 터미널이 뜨는지~~
+- ~~하달 중 Esc를 눌렀을 때 어떻게 되는지~~
+- ~~`/compact`와 `PreCompact` 훅(시나리오 10)~~
+
+## 확인 2 (2026-11-20, 설치본과 run-18)
+
+| 항목 | 결과 |
+|---|---|
+| 설치본(`dist/win-unpacked`)에서 터미널 | 다시 빌드한 설치본을 임시 사용자 데이터 폴더(`--user-data-dir`)로 띄웠다. 관제탑이 `resources/tower`에서 열리고, ORCHESTRA 칸에 run-12의 Claude Code가 떴다. 질문 → `Read`(guard.log에 허용) → 답 `memo`. 세션 id는 임시 폴더의 설정에만 남고 실제 `%APPDATA%Terrarium`은 바뀌지 않았다. 사전 점검 표시(`preflightOk`)는 손으로 넣었다. 실행 폴더의 하네스는 개발 폴더를 가리키므로, 설치본의 `resources/harness`로 하달까지 돈 것은 아니다(그 파일들이 들어 있는지만 봤다). 확인은 화면 캡처가 아니라 DevTools 프로토콜로 터미널 글자를 읽었다 |
+| 폴더 신뢰 질문 | 허용 목록이 있는 실행 폴더는 상위 폴더가 신뢰돼 있어도 묻는다. 보기는 "No, continue without these permissions"(기본 선택)와 "Yes, I trust this folder". No는 저장되지 않는다. No로 둔 세션에서 guard 훅은 돌았다. 이 컴퓨터는 `C:/`가 신뢰돼 있기 때문이다. Claude Code 문서: 대화형 세션은 그 폴더나 신뢰가 미치는 상위 폴더를 신뢰하기 전에는 설정 파일의 훅을 하나도 돌리지 않는다. README에 기본 선택이 No라는 것을 적었다 |
+| `/compact`(시나리오 10) | 대화형 세션에서 시나리오 04 하달 뒤 `/compact`(수동, 95k→10.7k 토큰), "계속해 줘". 하달 번호·이슈 번호·허용 해시를 이어 썼다. `verify --scenario 10` 자동 통과. **보존 항목 검증과 복구 결과 보고는 하지 않았다.** `PreCompact` 훅은 설정에 없어 돌 것이 없다. 훅을 더할지와 보존 노트 파일 이름은 소유자가 정한다 |
+| 하달 중 Esc | `run-operator`가 기다리는 중에 Esc → 턴이 끊기고, **하달이 통째로 죽었다**(오퍼레이터, 드라이버, 분리 실행한 자식까지). `session.json`에 `endedAt`이 남지 않았다(h5). "계속해 줘"에 코디네이터는 같은 명령을 새 하달 h6으로 다시 돌려 끝냈고, h5는 정리하지 않았다. 고친 것: 진행 표시가 pid가 살아 있는지 보고, 끝난 기록 없이 프로세스가 없는 하달을 "끊김"(관제탑은 일시정지와 정리 안내)으로 보인다. h5는 `stop-operator`로 정리했다 |
+| 대화형에서 어드바이저 보고 | 어드바이저가 결과를 `SubagentHandback`으로 돌려주려다 guard에 7번 막혀 "보고 없이 끝남"이 됐다(코디네이터는 `advice-log.jsonl`로 우회). `policy.mjs`가 advisor의 `SubagentHandback`을 허용하게 고쳤고, 다음 조언에서 정상 보고를 확인했다 |
 
 ## 결과와 위험
 
