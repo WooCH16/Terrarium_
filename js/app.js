@@ -18,6 +18,8 @@
   };
 
   const state = {mode: 'matrix', view: 'main', teamId: null, ops: [], op: null, sum: null, msgs: null};
+  // 카드 이름: 데이터에 이름이 있으면 그것(앱에서는 '하달 h3' 같은 실제 이름), 없으면 팀 이름
+  const nameOf = (id) => { const o = state.ops.find((x) => x.id === id); return (o && o.name) || NAMES[id]; };
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
 
@@ -45,11 +47,11 @@
     setHTML('arrows', state.ops.map((o, i) => {
       const w = o.state === 'work';
       return '<span data-team="' + o.id + '">' + lineHTML('arrow ' + (w ? 'flow' : 'still'), 'arrow-' + i, 'left: ' + (240 + i * 138) + 'px', 8, 35, 'M 4 0 L 4 31',
-        'Orchestra에서 ' + NAMES[o.id] + ', ' + (w ? '호출됨' : '호출 없음')) + '</span>';
+        'Orchestra에서 ' + nameOf(o.id) + ', ' + (w ? '호출됨' : '호출 없음')) + '</span>';
     }).join(''));
     setHTML('cards', state.ops.map((o, i) =>
       '<button type="button" class="card" data-team="' + o.id + '" data-state="' + o.state + '" style="left: ' + (184 + i * 138) + 'px">' +
-      '<span class="label">' + NAMES[o.id] + '</span>' + iconHTML(o.id, 36) + statusHTML(o.state) + '</button>').join(''));
+      '<span class="label">' + nameOf(o.id) + '</span>' + iconHTML(o.id, 36) + statusHTML(o.state) + '</button>').join(''));
     setHTML('messages', (state.msgs || []).slice(-4).map((m) => {
       const u = m.from === 'user';
       return '<div class="msg' + (u ? ' user' : '') + '"><span class="who">' + (u ? 'USER ›' : 'ORCHESTRA ›') + '</span><span class="body">' + esc(m.text) + '</span></div>';
@@ -62,16 +64,16 @@
     const n = op.workers.length;
     const cw = 140, gap = 16, sx = Math.round((720 - (n * cw + Math.max(0, n - 1) * gap)) / 2), ocx = 360;
     $('team-panel').dataset.team = id;
-    $('team-title').textContent = NAMES[id];
+    $('team-title').textContent = nameOf(id);
     setHTML('team-stats', statHTML('호출한 워커', n + '명') + statHTML('작업중', op.working + '명') + statHTML('평균 진행률', op.avg + '%'));
-    setHTML('team-op', '<div class="op-box" data-state="' + op.state + '"><div class="label">OPERATOR · ' + NAMES[id] + '</div>' + iconHTML(id, 34) + '<div>' + statusHTML(op.state) + '</div></div>');
+    setHTML('team-op', '<div class="op-box" data-state="' + op.state + '"><div class="label">OPERATOR · ' + nameOf(id) + '</div>' + iconHTML(id, 34) + '<div>' + statusHTML(op.state) + '</div></div>');
     setHTML('team-lines', op.workers.map((w, i) => {
       const wcx = sx + i * (cw + gap) + cw / 2;
       const lx = Math.min(ocx, wcx) - 4, lw = Math.abs(wcx - ocx) + 8, x0 = ocx - lx, x1 = wcx - lx;
       const on = w.state === 'work';
       return lineHTML('wline ' + (on ? 'flow' : 'still'), id + '-wline-' + i, 'left: ' + lx + 'px; width: ' + lw + 'px', lw, 56,
         'M ' + x0 + ' 0 L ' + x0 + ' 24 L ' + x1 + ' 24 L ' + x1 + ' 52',
-        NAMES[id] + ' 오퍼레이터에서 워커 ' + (i + 1) + ', ' + (on ? '호출됨' : '호출 없음'));
+        nameOf(id) + ' 오퍼레이터에서 워커 ' + (i + 1) + ', ' + (on ? '호출됨' : '호출 없음'));
     }).join(''));
     setHTML('team-workers', op.workers.map((w, i) =>
       '<div class="worker" data-state="' + w.state + '" style="left: ' + (sx + i * (cw + gap)) + 'px">' +
@@ -87,7 +89,7 @@
     setHTML('total-stats', statHTML('전체 팀', sum.operators + '개') + statHTML('호출 워커 합계', sum.workers + '명') + statHTML('작업중 워커', sum.working + '명') + statHTML('전체 평균 진행률', sum.avg + '%'));
     setHTML('total-rows', ops.map((o) =>
       '<button type="button" class="row grid-cols" data-team="' + o.id + '" data-state="' + o.state + '">' +
-      '<span class="name">' + NAMES[o.id] + '</span><span>' + statusHTML(o.state) + '</span>' +
+      '<span class="name">' + nameOf(o.id) + '</span><span>' + statusHTML(o.state) + '</span>' +
       '<span>' + o.workerCount + '명</span><span>' + o.working + '명</span>' +
       '<span class="prog">' + barHTML(o.avg) + '<span class="pct">' + o.avg + '%</span></span></button>').join(''));
     setHTML('total-dist', [['● 작업중', 'work'], ['○ 대기중', 'idle'], ['Ⅱ 일시정지', 'pause']].map((d) =>
@@ -130,7 +132,7 @@
       }
       el.style.left = px(x - 1) + 'px';
       el.style.top = px(y - 1) + 'px';
-      tags.push('<button type="button" class="tag-btn" data-team="' + o.id + '" data-state="' + o.state + '" style="left: ' + px(tx) + 'px; top: ' + px(ty) + 'px">' + NAMES[o.id] + '<br>' + STATE_LABEL[o.state] + '</button>');
+      tags.push('<button type="button" class="tag-btn" data-team="' + o.id + '" data-state="' + o.state + '" style="left: ' + px(tx) + 'px; top: ' + px(ty) + 'px">' + nameOf(o.id) + '<br>' + STATE_LABEL[o.state] + '</button>');
     });
     setHTML('office-screens', screens.join(''));
     setHTML('office-zs', zs.join(''));
@@ -149,6 +151,7 @@
       const on = !office && (b.dataset.team ? (state.view === 'team' && (state.teamId || 'dev') === b.dataset.team) : state.view === b.dataset.view);
       if (on) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current');
     });
+    document.querySelectorAll('.item[data-team]').forEach((b) => { b.textContent = nameOf(b.dataset.team); });
     renderMain();
     renderTeam();
     renderTotal();

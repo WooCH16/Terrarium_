@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('terrarium', {
   status: (run) => ipcRenderer.invoke('status', { run }),
   openUrl: (url) => ipcRenderer.invoke('open:url', { url }),
   onSettingsTab: (fn) => listen('settings:tab', fn),
+  // 관제탑 카드·팀·통합·사무실의 실제 상태(읽기 전용)
+  towerStatus: () => ipcRenderer.invoke('tower:status'),
   // 코디네이터 터미널(관제탑의 ORCHESTRA 칸)
   terminal: {
     // xterm 파일의 위치(앱 의존성). 관제탑 페이지는 저장소 루트에 있어 상대 경로로는 닿지 않는다.

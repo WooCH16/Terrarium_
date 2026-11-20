@@ -37,8 +37,11 @@ export function readHandoffs(run) {
       issues: session?.issues ?? [],
       mode: session?.mode ?? null,
       startedAt: session?.startedAt ?? null,
+      endedAt: session?.endedAt ?? null,
+      stoppedAt: session?.stoppedAt ?? null,
       stopped: existsSync(`${d}/stopped.json`),
-      running: Array.isArray(session?.pids) && session.pids.length > 0,
+      // 끝난 시각이 없고 오퍼레이터 pid나 러너 pid가 있으면 도는 중으로 본다.
+      running: !session?.endedAt && ((Array.isArray(session?.pids) && session.pids.length > 0) || (session?.pid !== undefined && session?.pid !== null)),
       modified: statSync(d).mtime.toISOString(),
     };
   }).sort((a, b) => Number(b.name.slice(1)) - Number(a.name.slice(1)));

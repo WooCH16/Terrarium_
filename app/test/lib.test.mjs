@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { coordinatorArgs, coordinatorEnv, CoordinatorTerminal, TOOLS } from '../lib/terminal.mjs';
 import { KeyStore } from '../lib/keys.mjs';
 import { readStatus } from '../lib/status.mjs';
+import { towerView, SLOTS } from '../lib/tower.mjs';
 import { install, checkInstallInput } from '../lib/install.mjs';
 
 const fwd = (p) => p.split(String.fromCharCode(92)).join('/');
@@ -144,4 +145,25 @@ test('설치: 비공개가 아닌 저장소는 setup을 부르지 않고 막는�
   assert.deepEqual(calls.at(-1), ['node', 'C:/h/setup.mjs', '--run', 'C:/d/runs/p1', '--repo', 'o/r', '--project', 'C:/src/app']);
   assert.match(checkInstallInput({ repo: 'o/r', runName: '../x' }), /실행 폴더 이름/);
   assert.match(checkInstallInput({ repo: 'nope', runName: 'a' }), /소유자/);
+});
+
+test('관제탑: 최근 하달이 카드 자리에, 맡은 이슈가 워커로, 라벨이 단계로 들어간다', async () => {
+  const run = tmp();
+  writeFileSync(`${run}/harness.json`, JSON.stringify({ designatedRepo: 'o/r' }));
+  for (let n = 1; n <= 6; n++) mkdirSync(`${run}/handoffs/h${n}`, { recursive: true });
+  for (let n = 1; n <= 5; n++) writeFileSync(`${run}/handoffs/h${n}/session.json`, JSON.stringify({ mode: 'work', issues: [n], pids: [], startedAt: '2026-11-20T01:00:00Z', endedAt: '2026-11-20T01:30:00Z' }));
+  writeFileSync(`${run}/handoffs/h6/session.json`, JSON.stringify({ mode: 'work', issues: [6, 7], pid: 5, pids: [] }));
+  writeFileSync(`${run}/handoffs/h5/stopped.json`, '{}');
+  const gh = () => JSON.stringify([{ number: 6, title: '정렬', state: 'OPEN', labels: [{ name: '리뷰대기' }], url: 'u' }, { number: 7, title: 'x', state: 'OPEN', labels: [{ name: '막힘' }], url: 'u' }, { number: 2, title: 'y', state: 'CLOSED', labels: [{ name: '반영됨' }], url: 'u' }]);
+  const v = towerView(await readStatus(run, gh));
+  assert.deepEqual(v.operators.map((o) => o.id), SLOTS, '자리 다섯 개는 그대로');
+  assert.deepEqual(v.operators.map((o) => o.name), ['하달 h2', '하달 h3', '하달 h4', '하달 h5', '하달 h6'], '최근 다섯 개, 오래된 것이 왼쪽');
+  assert.deepEqual(v.operators.map((o) => o.state), ['idle', 'idle', 'idle', 'pause', 'work'], '끝남=대기, 멈춤=일시정지, 오퍼레이터 pid가 있고 끝나지 않음=작업중');
+  assert.deepEqual(v.operators[4].workers.map((w) => [w.id, w.state, w.progress]), [['#6', 'work', 60], ['#7', 'pause', 30]]);
+  assert.deepEqual(v.operators[0].workers.map((w) => [w.state, w.progress]), [['idle', 100]], '반영됨은 끝까지');
+  assert.match(v.operators[3].log.at(-1), /멈춤/);
+  const few = towerView(await readStatus(run, () => { throw new Error('gh 로그인 필요'); }));
+  assert.match(few.operators[0].log.at(-1), /이슈를 못 읽음/);
+  assert.deepEqual(towerView(null).operators.map((o) => o.name), Array(5).fill('빈 자리'));
+  assert.match(towerView(null, '권한 없음').note, /권한 없음/);
 });

@@ -39,7 +39,7 @@ You can open the same run folder from either one. To open a run folder made in t
 
 ### 1. App
 
-`app/` holds a Windows desktop app (ADR 0010, 0011). The main window is the control-tower screen, and the coordinator terminal opens in its ORCHESTRA pane. The tower's operator cards, team, total, and office views still show mock data.
+`app/` holds a Windows desktop app (ADR 0010, 0011). The main window is the control-tower screen, and the coordinator terminal opens in its ORCHESTRA pane. The tower's operator cards, team, total, and office views show the run folder's five most recent handoffs (one handoff per card, its issues as workers, bars showing the issue label stage; read-only).
 
 ```bash
 cd app

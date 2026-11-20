@@ -10,6 +10,7 @@ import pty from 'node-pty';
 import { CoordinatorTerminal, coordinatorEnv } from './lib/terminal.mjs';
 import { KeyStore, KEY_NAMES, KEY_LABELS } from './lib/keys.mjs';
 import { readStatus } from './lib/status.mjs';
+import { towerView } from './lib/tower.mjs';
 import { install } from './lib/install.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -206,6 +207,22 @@ ipcMain.on('term:resize', (_e, { cols, rows } = {}) => term?.resize(cols, rows))
 ipcMain.handle('settings:open', (_e, { tab } = {}) => { openSettings(['accounts', 'install', 'progress'].includes(tab) ? tab : 'accounts'); return { ok: true }; });
 
 // ---- 진행 표시 (#40) ----
+// 관제탑 카드·팀·통합·사무실(결정 8-19): 지금 실행 폴더의 상태를 읽어 관제탑 모양으로 넘긴다. 읽기만 한다.
+// 관제탑은 4초마다 묻는다. 하달 파일은 매번 읽고, GitHub 이슈(gh)는 30초에 한 번만 읽는다.
+const towerCache = { run: null, at: 0, issues: null, err: null };
+// 30초 안에는 앞서 읽은 것을 준다. 읽기에 실패하면 앞서 읽은 것이 있으면 그것을, 없으면 그 실패를 30초 동안 준다.
+const cachedGh = async (args) => {
+  if (Date.now() - towerCache.at < 30000) { if (towerCache.issues !== null) return towerCache.issues; if (towerCache.err) throw towerCache.err; }
+  towerCache.at = Date.now();
+  try { towerCache.issues = await ghExec(args); towerCache.err = null; } catch (e) { towerCache.err = e; if (towerCache.issues === null) throw e; }
+  return towerCache.issues;
+};
+ipcMain.handle('tower:status', async () => {
+  const run = readPrefs().currentRun;
+  if (!allowedRun(run)) return towerView(null);
+  if (towerCache.run !== run) Object.assign(towerCache, { run, at: 0, issues: null, err: null });
+  try { return towerView(await readStatus(run, cachedGh)); } catch (e) { return towerView(null, e.message); }
+});
 ipcMain.handle('status', async (_e, { run }) => { if (!allowedRun(run)) return { ok: false, error: '실행 폴더를 고르세요.' }; try { return { ok: true, status: await readStatus(run, ghExec) }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('open:url', (_e, { url }) => { if (/^https:\/\/github\.com\//.test(url)) shell.openExternal(url); });
 
@@ -226,6 +243,12 @@ async function smoke(dir) {
   fitTower();
   await wait(Number(process.env.TERRARIUM_SMOKE_WAIT ?? 8) * 1000);
   await shot(win, 'tower');
+  // 관제탑의 팀 상세·통합·사무실도 눌러서 찍는다(실제 상태가 들어갔는지 보려고).
+  for (const [name, sel] of [['tower-team', '.item[data-team="sec"]'], ['tower-total', '.item-total'], ['tower-office', '.tab[data-mode="office"]'], ['tower-back', '.tab[data-mode="matrix"]']]) {
+    await win.webContents.executeJavaScript(`document.querySelector('${sel}').click()`);
+    await wait(2500);
+    await shot(win, name);
+  }
   // TERRARIUM_SMOKE_STEPS='[["글자", 기다릴 초], ...]': 실제 코디네이터 터미널에 차례로 쳐 넣고, 단계마다 찍는다.
   const steps = process.env.TERRARIUM_SMOKE_STEPS ? JSON.parse(process.env.TERRARIUM_SMOKE_STEPS) : [];
   for (const [i, [keys, secs]] of steps.entries()) {
