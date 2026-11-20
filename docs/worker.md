@@ -1,6 +1,7 @@
 # 워커 설계
 
 - 실행 문서: [`harness/worker/AGENT.md`](../harness/worker/AGENT.md) (`run-worker.mjs`가 읽어 워커 입력 맨 앞에 붙인다)
+- 스킬: `harness/worker/skills/worker-issue`(이슈 하나 끝내기 점검표). 워커 모델은 Claude Code가 아닐 수 있어 Skill 도구로 부르지 않고, `run-worker.mjs`가 실행 문서 뒤에 본문(frontmatter 뺌)을 붙인다.
 - 실행 코드: `harness/operator/run-worker.mjs`, `runners.mjs`, `model-exec.mjs`
 - 결정: ADR 0004(워커는 시작 스크립트로), ADR 0007(Muse 공개 제한), ADR 0008(라우팅), ADR 0009(세 모델 모두 Pi). 오퍼레이터 쪽 접점은 [operator.md](operator.md) 5장
 
@@ -26,7 +27,7 @@
 
 ## 4. 입력과 출력
 
-- **입력:** `.harness/worker-input.md` = 실행 문서 전체 + `# 워커 입력 (이슈 #n)` 절(이슈 번호, 워크트리, 이슈 본문, 이전 실패 이유). 다른 이슈, 코디네이터·사용자 대화는 넘기지 않는다. 이슈 본문은 참고용 데이터로 넘긴다.
+- **입력:** `.harness/worker-input.md` = 실행 문서 전체 + 워커 스킬 본문 + `# 워커 입력 (이슈 #n)` 절(이슈 번호, 워크트리, 이슈 본문, 이전 실패 이유). 다른 이슈, 코디네이터·사용자 대화는 넘기지 않는다. 이슈 본문은 참고용 데이터로 넘긴다.
 - **출력:** `.harness/worker-result.md`의 네 칸(`이슈 번호`, `변경 요약`, `테스트 명령과 결과`, `커밋 해시`). 칸 이름은 `protocol.mjs`의 `RESULT_FIELDS`이고, 시험이 실행 문서와 같은지 확인한다.
 - **스크립트 출력:** 한 줄 JSON(시작·종료 `main` 해시, 시도 횟수, 실제로 띄운 `model`, 대체됐을 때 `replacedFrom`·`replacedReason`, 워크트리 이름).
 

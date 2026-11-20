@@ -1,6 +1,7 @@
 # 코디네이터 설계
 
 - 실행 문서: [`harness/coordinator/AGENT.md`](../harness/coordinator/AGENT.md) (설치하면 실행 폴더의 `CLAUDE.md`)
+- 스킬: `harness/coordinator/skills/coordinator-*` 10개(직접 지시, 정리본, 조언, 이슈, 하달, 판정·대조, 반영, 조사, 기록, 예외). 설치하면 실행 폴더의 `.claude/skills/`에 들어가고 Skill 도구로 부른다(ADR 0005). 다른 역할의 스킬은 훅이 막는다.
 - 전체 흐름과 양식: [01-overview.md](01-overview.md). 이 문서는 코디네이터 한 역할만 모아 적은 것이고, 자세한 절차는 overview와 실행 문서를 따른다.
 - 결정: ADR 0001, 0002, 0005, 0006, 0008, 0010, 0011
 

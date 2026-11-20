@@ -36,13 +36,20 @@ export function pruneDeadPids(pids, alive = defaultAlive) {
 // 중단 표시(stop-operator가 kill 전에 쓴다). 있으면 드라이버는 재시작·정리·보류 표시를 하지 않는다.
 export const isStopped = (run, handoff) => existsSync(`${fwd(run)}/handoffs/${handoff}/stopped.json`);
 
+// SKILL.md 머리의 frontmatter를 뗀다. 없으면 그대로 돌려준다.
+export function stripFrontmatter(text) {
+  const m = /^---\r?\n[\s\S]*?\r?\n---\r?\n(?:\r?\n)?/.exec(text);
+  return m ? text.slice(m[0].length) : text;
+}
+
 export function loadModeDocs(mode, harnessDir) {
   if (!MODES.includes(mode)) throw new ConfigError(`알 수 없는 모드입니다: ${JSON.stringify(String(mode)).slice(0, 40)}`);
   const parts = [];
-  for (const name of ['AGENT.md', `${mode}.md`]) {
+  // 공통 규칙(AGENT.md) 뒤에 모드 절차 스킬을 붙인다. 스킬의 frontmatter(--- … ---)는 세션 지침에 넣지 않는다.
+  for (const name of ['AGENT.md', `skills/operator-${mode}/SKILL.md`]) {
     const file = `${fwd(harnessDir)}/operator/${name}`;
     try {
-      parts.push(readFileSync(file, 'utf8'));
+      parts.push(stripFrontmatter(readFileSync(file, 'utf8')));
     } catch (e) {
       throw new ConfigError(`모드 문서를 읽을 수 없습니다: ${file} (${e.code ?? e.message})`);
     }

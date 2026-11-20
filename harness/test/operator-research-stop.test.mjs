@@ -31,7 +31,11 @@ function setup() {
   mkdirSync(`${run}/handoffs`, { recursive: true });
   mkdirSync(`${harnessDir}/operator`, { recursive: true });
   copyFileSync(`${realHarness}/operator/operator.config.json`, `${harnessDir}/operator/operator.config.json`);
-  for (const f of ['AGENT.md', 'research.md', 'work.md']) writeFileSync(`${harnessDir}/operator/${f}`, `# ${f}\n`);
+  writeFileSync(`${harnessDir}/operator/AGENT.md`, '# AGENT.md\n');
+  for (const m of ['research', 'work']) {
+    mkdirSync(`${harnessDir}/operator/skills/operator-${m}`, { recursive: true });
+    writeFileSync(`${harnessDir}/operator/skills/operator-${m}/SKILL.md`, `# ${m}.md\n`);
+  }
   writeFileSync(`${run}/harness.json`, JSON.stringify({ harnessDir, designatedRepo: 'o/r', issuesClone: `${root}/issues`, targetProject: `${root}/memo`, worktrees: `${run}/worktrees` }));
   return { root, run, harnessDir, env: { HARNESS_RUN_DIR: run } };
 }

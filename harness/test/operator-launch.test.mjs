@@ -77,7 +77,8 @@ function makeRun({ withConfig = true } = {}) {
   const harnessDir = tmp('op-harness-');
   mkdirSync(`${harnessDir}/operator`, { recursive: true });
   writeFileSync(`${harnessDir}/operator/AGENT.md`, 'AGENT-DOC');
-  writeFileSync(`${harnessDir}/operator/work.md`, 'WORK-DOC');
+  mkdirSync(`${harnessDir}/operator/skills/operator-work`, { recursive: true });
+  writeFileSync(`${harnessDir}/operator/skills/operator-work/SKILL.md`, 'WORK-DOC');
   if (withConfig) copyFileSync(`${realHarness}/operator/operator.config.json`, `${harnessDir}/operator/operator.config.json`);
   const memo = `${run}/memo`;
   mkdirSync(memo, { recursive: true });
@@ -497,7 +498,7 @@ test('run-operator: 설정 파일이 없으면 종료 코드 2와 한 줄 사유
 test('run-operator: 모드 문서가 없으면 종료 코드 2', async () => {
   const ctx = makeRun();
   fakeEnv();
-  rmSync(`${ctx.harnessDir}/operator/work.md`);
+  rmSync(`${ctx.harnessDir}/operator/skills/operator-work/SKILL.md`);
   const { code, lines } = await runMain(['--issues', '7'], ctx, stubs());
   assert.equal(code, 2);
   assert.match(lines[0], /문서/);

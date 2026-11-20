@@ -205,7 +205,11 @@ function forbiddenRule(path) {
 // ---- 입력·결과 ----
 // 워커 규칙의 기준은 harness/worker/AGENT.md 하나다. 이 이슈의 정보만 코드가 뒤에 붙인다.
 export const WORKER_DOC = new URL('../worker/AGENT.md', import.meta.url);
-export function inputText({ issue, worktree, body, failures }, doc = readFileSync(WORKER_DOC, 'utf8')) {
+// 워커 스킬(이슈 하나 끝내기 점검표). 워커 모델은 Claude Code가 아닐 수 있어 스킬 도구 대신 규칙 뒤에 글로 붙인다.
+export const WORKER_SKILL = new URL('../worker/skills/worker-issue/SKILL.md', import.meta.url);
+const dropFrontmatter = (t) => t.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n(?:\r?\n)?/, '');
+export const workerDoc = () => `${readFileSync(WORKER_DOC, 'utf8').trimEnd()}\n\n${dropFrontmatter(readFileSync(WORKER_SKILL, 'utf8')).trimEnd()}`;
+export function inputText({ issue, worktree, body, failures }, doc = workerDoc()) {
   const parts = [
     doc.trimEnd(),
     '',

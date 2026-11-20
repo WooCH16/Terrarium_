@@ -1,5 +1,7 @@
 # 오퍼레이터 설계
 
+- 실행 문서와 스킬: `harness/operator/AGENT.md`(공통 규칙)와 `harness/operator/skills/operator-work`, `operator-research`(모드별 절차, `launch.mjs`가 AGENT.md 뒤에 붙인다), `operator-reflect`(`run-reflect`가 코드로 하는 일). 예전의 `work.md`·`research.md`·`reflect.md`를 그대로 옮긴 것이다.
+
 - 상태: **채택됨** (2026-11-14 사용자 승인). 근거는 [ADR 0003](adr/0003-operator-harness.md)이다(원본이 없어 이 문서에서 되살린 본문, 이슈 #30). 이 문서가 오퍼레이터의 현재 설계다.
 - **워커의 실행 방식과 모델 목록은 [ADR 0004](adr/0004-pi-worker-reviewer.md) 결정 A(채택됨, 2026-11-18)가 대체했다.** 워커는 Pi 하네스로 실행하고 모델은 `claude`, `gemini`, `muse`다(`codex`는 뺐다). 대체된 곳에는 "대체됨 → ADR 0004" 표시를 달았다. 2단계 구현의 임시값은 "임시(이슈 #2)"로 표시했다.
 - `docs/history/`(이 저장소에 없음)는 사람이 확인하려고 만든 이력 문서이므로 **읽지 않는다.** 이 문서의 근거로도 링크하지 않는다.

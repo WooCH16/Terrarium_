@@ -1,3 +1,9 @@
+---
+name: operator-reflect
+description: 반영(run-reflect)이 코드로 하는 일을 적은 절차 문서. 허용 수집, 의존 제외, land, 반영됨 표시, 종료 코드. 반영은 오퍼레이터 세션을 띄우지 않으므로 이 글은 세션에 주입되지 않고, 반영 코드를 고치거나 결과를 설명할 때 읽는다.
+user-invocable: false
+---
+
 # 반영 절차 (run-reflect가 코드로 하는 일)
 
 이 문서는 `run-reflect.mjs`가 **코드로** 하는 일을 적은 것이다. 새 절차를 만들지 않는다.

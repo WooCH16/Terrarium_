@@ -1,6 +1,7 @@
 # 어드바이저 설계
 
 - 실행 문서: [`harness/advisor/AGENT.md`](../harness/advisor/AGENT.md) (설치하면 실행 폴더의 `.claude/agents/advisor.md`)
+- 스킬: `harness/advisor/skills/advisor-proposal`, `advisor-data-request`. 설치하면 실행 폴더의 `.claude/skills/`에 들어가고, 정의의 `skills:` 칸(설치 때 넣음)으로 하위 에이전트가 시작할 때 본문이 미리 주입된다. 어드바이저에게 Skill 도구는 주지 않는다.
 - 결정: ADR 0002(조언을 리뷰어가 거른다), ADR 0006(어드바이저가 리뷰어를 직접 부른다), ADR 0008(리뷰어는 Jev). 이슈 #42, 소유자 위임 8-11, 결정 8-15
 - 이 문서는 옛 `docs/harness/advisor.md`를 넓힌 것이다.
 

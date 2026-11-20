@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const harnessDir = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => readFileSync(join(harnessDir, p), 'utf8');
-const MODE_DOCS = ['operator/AGENT.md', 'operator/work.md', 'operator/research.md', 'operator/reflect.md'];
+const MODE_DOCS = ['operator/AGENT.md', 'operator/skills/operator-work/SKILL.md', 'operator/skills/operator-research/SKILL.md', 'operator/skills/operator-reflect/SKILL.md'];
 const noLineHas = (text, a, b) => text.split('\n').every((l) => !(a.test(l) && b.test(l)));
 
 test('mode docs exist and contain no unfilled {{...}} placeholders', () => {
@@ -21,7 +21,7 @@ test('no result file name contains "report" (test run 4 lesson)', () => {
 });
 
 test('work.md: worker and enqueue steps, and no direct merge into main', () => {
-  const w = read('operator/work.md');
+  const w = read('operator/skills/operator-work/SKILL.md');
   assert.match(w, /run-worker/);
   assert.match(w, /merge-adapter/);
   assert.match(w, /result-<번호>-h<N>\.md/);
@@ -30,11 +30,11 @@ test('work.md: worker and enqueue steps, and no direct merge into main', () => {
 });
 
 test('research.md has no reflect or merge procedure', () => {
-  assert.doesNotMatch(read('operator/research.md'), /반영|merge|병합|run-reflect|merge-adapter/);
+  assert.doesNotMatch(read('operator/skills/operator-research/SKILL.md'), /반영|merge|병합|run-reflect|merge-adapter/);
 });
 
 test('reflect.md names merge-adapter-land and says no session is launched', () => {
-  const r = read('operator/reflect.md');
+  const r = read('operator/skills/operator-reflect/SKILL.md');
   assert.match(r, /merge-adapter-land/);
   assert.match(r, /run-reflect/);
   assert.match(r, /세션을 (띄우지|시작하지) 않/);
@@ -55,7 +55,7 @@ test('AGENT.md carries the shared rules (secrets, names, facts, pre-start review
 });
 
 test('report format: first line ## 결과 보고서 and one 커밋 해시 line (40 hex)', () => {
-  const doc = [read('operator/AGENT.md'), read('operator/work.md')].join('\n');
+  const doc = [read('operator/AGENT.md'), read('operator/skills/operator-work/SKILL.md')].join('\n');
   assert.match(doc, /## 결과 보고서/);
   assert.match(doc, /커밋 해시: <40자리 소문자 16진수>/);
 });
@@ -87,8 +87,8 @@ test('coordinator.md: 작업 이슈는 진행중 라벨로 올리고, 보고서 
 });
 
 test('I3: 같은 하달 재작업은 지원하지 않는다고 work.md·coordinator.md·docs/operator.md가 말한다', () => {
-  assert.match(read('operator/work.md'), /재작업은 지원하지 않는다/);
-  assert.doesNotMatch(read('operator/work.md'), /--handoff h<N>`\)\. 재작업 세션|## 재작업 세션/);
+  assert.match(read('operator/skills/operator-work/SKILL.md'), /재작업은 지원하지 않는다/);
+  assert.doesNotMatch(read('operator/skills/operator-work/SKILL.md'), /--handoff h<N>`\)\. 재작업 세션|## 재작업 세션/);
   assert.match(read('coordinator/AGENT.md'), /같은 하달.*재작업은 지원하지 않는다/);
   assert.match(readFileSync(join(harnessDir, '..', 'docs', 'operator.md'), 'utf8'), /같은 하달 안의 재작업은 지원하지 않는다/);
   assert.match(readFileSync(join(harnessDir, '..', 'docs', 'operator.md'), 'utf8'), /--force-restart/);

@@ -368,6 +368,11 @@ export function decide(input, config, deps) {
   if (input.agent_type) return decideSubagent(input, config, deps);
 
   if (!COORDINATOR_TOOLS.has(tool)) return deny(`코디네이터는 ${tool} 도구를 쓸 수 없다`);
+  // 어드바이저 스킬도 실행 폴더의 같은 스킬 폴더에 설치된다(하위 에이전트에 미리 주입하려고). 다른 역할의 스킬은 코디네이터가 부르지 않는다.
+  if (tool === 'Skill') {
+    const name = String(toolInput?.skill ?? '').split(':').pop();
+    if (/^(advisor|operator|worker|reviewer)-/.test(name)) return deny(`코디네이터는 다른 역할의 스킬(${name.slice(0, 60)})을 부르지 않는다. 코디네이터 스킬은 coordinator-로 시작한다`);
+  }
   if (tool === 'Read' || tool === 'Grep') {
     const r = secretReadCheck(input, config, deps);
     if (r) return r;

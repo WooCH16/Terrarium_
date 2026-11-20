@@ -1,6 +1,7 @@
 # 리뷰어 설계
 
 - 규칙 문서: [`harness/reviewer/AGENT.md`](../harness/reviewer/AGENT.md). 그 문서의 `## Jev 질문` 절을 `jev-review.mjs`가 읽어 판정 질문을 만든다.
+- 스킬: `harness/reviewer/skills/reviewer-verdict`(판정 순서). Jev는 프롬프트를 읽지 않으므로 주입되지 않는 절차 문서다. 질문 문장은 옮겨 적지 않는다(`test/skills.test.mjs`가 막음).
 - 실행 코드: `harness/operator/run-reviewer.mjs`(실행, 기록, 댓글), `jev-review.mjs`(코드 검사, 질문, 결정), `jev.mjs`(API 호출)
 - 결정: ADR 0002(리뷰어가 두 곳을 거른다), ADR 0006(조언 판정), ADR 0008(Jev와 라우팅). ADR 0004의 모델 순환은 0008로 대체됐다. `pi-워커-리뷰어.md`는 그 전의 계획(안)이다.
 

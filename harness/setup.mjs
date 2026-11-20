@@ -98,7 +98,17 @@ const fill = (text) => text
 // 2. 쓸 규칙·에이전트·설정을 먼저 만들고, 자리표시자가 남았으면 쓰기 전에 멈춘다.
 const roleFiles = new Map();
 roleFiles.set('CLAUDE.md', fill(readFileSync(`${harnessDir}/coordinator/AGENT.md`, 'utf8')));
-roleFiles.set('.claude/agents/advisor.md', fill(readFileSync(advisorStub ? `${harnessDir}/stubs/advisor-stub.md` : `${harnessDir}/advisor/AGENT.md`, 'utf8')));
+// 역할 스킬: 코디네이터 스킬은 실행 폴더의 프로젝트 스킬로 설치해 Skill 도구로 부르고(ADR 0005),
+// 어드바이저 스킬은 같은 곳에 설치한 뒤 하위 에이전트 정의의 skills 칸으로 시작할 때 미리 주입한다(어드바이저에게 Skill 도구는 없다).
+// 오퍼레이터·워커 스킬은 launch.mjs·run-worker.mjs가 지침 글에 붙이고, 리뷰어 스킬은 코드의 절차 문서라 설치하지 않는다.
+const skillNames = (role) => { const d = `${harnessDir}/${role}/skills`; return existsSync(d) ? readdirSync(d).filter((n) => existsSync(`${d}/${n}/SKILL.md`)).sort() : []; };
+const withSkills = (text, names) => names.length === 0 ? text : text.replace(/^(---\r?\n[\s\S]*?)(\r?\n---\r?\n)/, (_, head, end) => `${head}\nskills:\n${names.map((n) => `  - ${n}`).join('\n')}${end}`);
+const advisorSkills = advisorStub ? [] : skillNames('advisor');
+roleFiles.set('.claude/agents/advisor.md', withSkills(fill(readFileSync(advisorStub ? `${harnessDir}/stubs/advisor-stub.md` : `${harnessDir}/advisor/AGENT.md`, 'utf8')), advisorSkills));
+for (const role of ['coordinator', 'advisor']) {
+  if (role === 'advisor' && advisorStub) continue;
+  for (const name of skillNames(role)) roleFiles.set(`.claude/skills/${name}/SKILL.md`, fill(readFileSync(`${harnessDir}/${role}/skills/${name}/SKILL.md`, 'utf8')));
+}
 roleFiles.set('.claude/settings.json', JSON.stringify({
   permissions: { allow: ['Bash', 'Write', 'Edit', 'Read', 'Glob', 'Grep', 'Agent', 'TodoWrite'] },
   hooks: {
@@ -126,7 +136,7 @@ mkdirSync(config.worktrees, { recursive: true });
 mkdirSync(`${run}/logs`, { recursive: true });
 mkdirSync(`${run}/handoffs`, { recursive: true });
 mkdirSync(`${run}/reviewer-inbox`, { recursive: true }); // 리뷰어 전용 폴더(ADR 0006): 어드바이저가 제안문을 쓰고 run-reviewer --advice가 읽는다
-for (const [name, text] of roleFiles) writeFileSync(`${run}/${name}`, text);
+for (const [name, text] of roleFiles) { mkdirSync(dirname(`${run}/${name}`), { recursive: true }); writeFileSync(`${run}/${name}`, text); }
 
 const NEXT = `cd "${run}" && claude --setting-sources project,local --allowedTools "Bash Write Edit Read Glob Grep Agent TodoWrite Skill"`;
 if (refresh) {
