@@ -66,5 +66,5 @@ export async function main(argv, env = process.env, deps = {}) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   // 분리 실행(background.mjs): Bash 도구의 10분 제한 안에서 기다리고, 길어지면 종료 코드 8과 대기 번호를 낸다.
   const { cliEntry } = await import('./background.mjs');
-  process.exitCode = await cliEntry({ main, entry: fileURLToPath(import.meta.url) });
+  process.exitCode = await cliEntry({ main, entry: fileURLToPath(import.meta.url), record: true });
 }

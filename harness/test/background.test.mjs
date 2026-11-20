@@ -1,7 +1,7 @@
 // run-7 결함: 하달이 Bash 도구의 10분 제한에 끊겼다. 분리 실행과 이어서 기다리기.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -23,7 +23,7 @@ const main = async (argv, env, deps = {}) => {
   write('#7 | 막힘 | https://x/7 args=' + argv.join(' '));
   return 1;
 };
-process.exitCode = await cliEntry({ main, entry: fileURLToPath(import.meta.url) });
+process.exitCode = await cliEntry({ main, entry: fileURLToPath(import.meta.url), record: process.env.FAKE_RECORD === '1' });
 `;
 
 function setup() {
@@ -57,6 +57,21 @@ test('run-7: 안 끝나면 대기 번호와 종료 코드 8, wait-operator로 �
   const code = await waitMain(['--wait', m[1]], { HARNESS_RUN_DIR: s.run }, { write: (l) => out.push(l), waitMs: 20000, pollMs: 50 });
   assert.equal(code, 1);
   assert.deepEqual(out, ['#7 | 막힘 | https://x/7 args=--issues 7']);
+});
+
+test('run-18 h7: 코디네이터가 띄운 실행만 last-wait.json에 대기 번호를 남긴다(워커 실행은 남기지 않는다)', () => {
+  const w = setup();
+  const r1 = w.exec({ FAKE_SLEEP_MS: '2500', HARNESS_BG_WAIT_MS: '100' });
+  assert.equal(r1.status, 8, r1.stderr);
+  assert.equal(existsSync(`${w.run}/handoffs/last-wait.json`), false);
+  const c = setup();
+  const r2 = c.exec({ FAKE_SLEEP_MS: '2500', HARNESS_BG_WAIT_MS: '100', FAKE_RECORD: '1' });
+  assert.equal(r2.status, 8, r2.stderr);
+  const token = /대기 번호 ([0-9a-f]{12})/.exec(r2.stdout)[1];
+  const last = JSON.parse(readFileSync(`${c.run}/handoffs/last-wait.json`, 'utf8'));
+  assert.equal(last.token, token);
+  assert.equal(last.script, 'fake-entry.mjs');
+  assert.deepEqual(last.args, ['--issues', '7']);
 });
 
 test('run-7: wait-operator는 모르는 번호·잘못된 인자를 2로 거부한다', async () => {

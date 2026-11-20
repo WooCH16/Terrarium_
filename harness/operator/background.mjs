@@ -7,6 +7,7 @@
 import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from 'node:fs';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { basename } from 'node:path';
 
 export const WAITING = 8;
 export const TOKEN = /^[0-9a-f]{12}$/;
@@ -31,6 +32,15 @@ export function writeBg(run, token, data) {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
     }
   }
+}
+
+export const lastWaitFile = (run) => `${fwd(run)}/handoffs/last-wait.json`;
+
+export function writeLastWait(run, data) {
+  const f = lastWaitFile(run);
+  mkdirSync(`${fwd(run)}/handoffs`, { recursive: true });
+  writeFileSync(`${f}.tmp`, JSON.stringify(data));
+  renameSync(`${f}.tmp`, f);
 }
 
 export function readBg(run, token) {
@@ -70,7 +80,7 @@ export function report(r, { token, harnessDir, write, writeErr = (l) => console.
 }
 
 // 부모 쪽: entry를 --bg-token과 함께 분리 실행하고 기다린다.
-export async function startAndWait({ run, harnessDir, entry, args, env = process.env, write = (l) => console.log(l), spawn = nodeSpawn }) {
+export async function startAndWait({ run, harnessDir, entry, args, env = process.env, write = (l) => console.log(l), spawn = nodeSpawn, record = false }) {
   const token = randomBytes(6).toString('hex');
   // Windows에서 detached가 아니면 Node(libuv)가 자식을 작업 객체에 넣어 부모가 끝날 때 같이 죽인다(run-8에서 재현). 그래서 detached로 띄운다.
   // 그런데 detached 프로세스는 콘솔이 없어, 그 아래에서 부르는 git이 가끔 콘솔 닫힘(0xC000013A)으로 죽는다.
@@ -81,7 +91,11 @@ export async function startAndWait({ run, harnessDir, entry, args, env = process
   const launcher = spawn(process.execPath, [entry, '--bg-launch', token, ...args], { cwd: process.cwd(), env, detached: true, stdio: 'ignore', windowsHide: true });
   launcher.on?.('error', () => {});
   // 첫 기록부터 pid를 남긴다: 자식이 자기 기록을 쓰기 전에 죽어도 기다리는 쪽이 알아챈다(fable 조언 2). 발사 프로세스가 곧 자식 pid로 바꿔 쓴다.
-  writeBg(run, token, { done: false, pid: launcher.pid ?? null, startedAt: new Date().toISOString() });
+  const startedAt = new Date().toISOString();
+  writeBg(run, token, { done: false, pid: launcher.pid ?? null, startedAt });
+  // 코디네이터가 띄운 하달·조사만 대기 번호를 고정 파일에 남긴다(record). 오퍼레이터가 부르는 run-worker도 같은 bg 폴더에 쓰므로,
+  // "가장 최근 bg 파일"로 찾으면 워커의 번호를 잡는다(run-18 h7, 2026-11-20). Esc 뒤 코디네이터는 이 파일 하나만 읽는다.
+  if (record) writeLastWait(run, { token, script: basename(entry), args, startedAt });
   launcher.unref?.();
   return report(await waitFor(run, token, { waitMs: waitMsOf(env) }), { token, harnessDir, write });
 }
@@ -118,7 +132,7 @@ export async function runChild({ run, token, main, argv, env }) {
 }
 
 // run-operator·run-research의 명령줄 진입점. --bg-token이 있으면 자식, HARNESS_FOREGROUND=1이면 예전처럼 그 자리에서 돈다.
-export async function cliEntry({ main, entry, argv = process.argv.slice(2), env = process.env }) {
+export async function cliEntry({ main, entry, argv = process.argv.slice(2), env = process.env, record = false }) {
   const run = fwd(env.HARNESS_RUN_DIR || process.cwd());
   for (const flag of ['--bg-launch', '--bg-token', '--bg-run']) {
     const t = argv.indexOf(flag);
@@ -133,5 +147,5 @@ export async function cliEntry({ main, entry, argv = process.argv.slice(2), env 
   // 실행 폴더가 아니면(harness.json 없음) 분리하지 않는다: main이 바로 오류를 낸다.
   let harnessDir;
   try { harnessDir = fwd(JSON.parse(readFileSync(`${run}/harness.json`, 'utf8')).harnessDir); } catch { return main(argv, env); }
-  return startAndWait({ run, harnessDir, entry, args: argv, env });
+  return startAndWait({ run, harnessDir, entry, args: argv, env, record });
 }
