@@ -51,7 +51,7 @@ test('settings hook points at guard with absolute config', () => {
 test('role docs: tools and file names match what the run showed', () => {
   const read = (p) => readFileSync(join(harnessDir, p), 'utf8');
   // 결과 보고서는 오퍼레이터가 올린 것만 인정한다
-  assert.match(read('coordinator.md'), /대신 올리지 않는다/);
+  assert.match(read('coordinator/AGENT.md'), /대신 올리지 않는다/);
 });
 
 test('refresh rewrites role files only', () => {
@@ -132,7 +132,7 @@ test('T3: 지정 저장소가 PRIVATE이면 클론하고 실행 폴더에 규칙
 
 test('T3: {{REPO}}, {{ISSUES}}, {{MEMO}}, {{HARNESS}}가 CLAUDE.md와 에이전트 정의에 하나도 남지 않는다', () => {
   // 원본에는 네 자리표시자가 모두 있어야 이 시험이 의미 있다
-  const source = readFileSync(join(harnessDir, 'coordinator.md'), 'utf8');
+  const source = readFileSync(join(harnessDir, 'coordinator', 'AGENT.md'), 'utf8');
   for (const p of ['{{REPO}}', '{{ISSUES}}', '{{MEMO}}', '{{HARNESS}}']) assert.ok(source.includes(p), `원본 coordinator.md에 ${p}가 있다`);
   const run = runSetup();
   for (const f of ['CLAUDE.md', '.claude/agents/advisor.md', '.claude/settings.json', 'harness.json']) {

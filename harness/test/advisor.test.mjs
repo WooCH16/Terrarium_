@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { decide } from '../policy.mjs';
 import { proposalProblems } from '../operator/jev-review.mjs';
 
-const text = readFileSync(fileURLToPath(new URL('../agents/advisor.md', import.meta.url)), 'utf8');
+const text = readFileSync(fileURLToPath(new URL('../advisor/AGENT.md', import.meta.url)), 'utf8');
 const config = { harnessDir: 'C:/h', runDir: 'C:/run', issuesClone: 'C:/run/issues', targetProject: 'C:/run/memo', designatedRepo: 'o/r' };
 const fill = (t) => t.replaceAll('{{HARNESS}}', config.harnessDir).replaceAll('{{RUN}}', config.runDir).replaceAll('{{MEMO}}', config.targetProject).replaceAll('{{PROJECT}}', 'memo');
 

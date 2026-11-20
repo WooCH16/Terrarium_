@@ -10,12 +10,47 @@
 //   코드: 작업 단위마다 목표, 완료 기준 표(기준 / 확인 방법), 먼저 끝나야 할 것, 전제·위험.
 //   Jev: 기준 줄마다 두 질문 — 충족/미충족을 가릴 수 있는 문장인가, 확인 방법이 실행할 수 있는 시험·명령이거나 사람이 직접 보는 확인인가.
 //   결정: 위와 같다.
-// 질문 문구는 이 파일에만 둔다(스킬 권장: 한곳에 모아 감사·수정하기 쉽게).
+// 질문 문구의 기준은 harness/reviewer/AGENT.md의 `## Jev 질문` 절 하나다(리뷰어 규칙 문서). 이 모듈은 그 절을 읽어 질문을 만든다.
+import { readFileSync } from 'node:fs';
 import { readNoul } from './jev.mjs';
 import { REPORT_HEAD, REPORT_SECTIONS, REPORT_TABLE } from './protocol.mjs';
 
 export { REPORT_SECTIONS };
 export const UNIT_SECTIONS = ['목표', '완료 기준', '먼저 끝나야 할 것', '전제·위험'];
+
+export const REVIEWER_DOC = new URL('../reviewer/AGENT.md', import.meta.url);
+export const QUESTION_NAMES = ['met', 'evidence', 'decidable', 'checkable'];
+
+// `## Jev 질문` 절의 `### <이름>`마다 `- 묻는 말:`, `- 예:`, `- 아니오:` 줄을 읽는다.
+// 하나라도 없으면 오류다(빈 질문으로 판정하지 않는다).
+export function parseQuestions(text) {
+  const lines = String(text).split(/\r?\n/);
+  const start = lines.findIndex((l) => /^## Jev 질문\s*$/.test(l));
+  if (start < 0) throw new Error('리뷰어 문서에 `## Jev 질문` 절이 없습니다.');
+  const out = {};
+  let cur = null;
+  for (const l of lines.slice(start + 1)) {
+    if (/^## /.test(l)) break;
+    const h = /^### (\S+)\s*$/.exec(l);
+    if (h) { cur = out[h[1]] = {}; continue; }
+    const m = /^- (묻는 말|예|아니오): (.+)$/.exec(l);
+    if (cur && m) cur[{ '묻는 말': 'ask', 예: 'yes', 아니오: 'no' }[m[1]]] = m[2].trim();
+  }
+  for (const n of QUESTION_NAMES) {
+    const q = out[n];
+    if (!q?.ask || !q.yes || !q.no) throw new Error(`리뷰어 문서의 질문 ${n}에 묻는 말·예·아니오 줄이 모두 있어야 합니다.`);
+  }
+  return out;
+}
+
+let loaded = null;
+const questionsDoc = () => (loaded ??= parseQuestions(readFileSync(REVIEWER_DOC, 'utf8')));
+// 자리표시 {기준}·{확인 방법} 바꾸기. 값에 $가 있어도 그대로 들어가게 split/join을 쓴다.
+const fill = (s, vars) => Object.entries(vars).reduce((acc, [k, v]) => acc.split(`{${k}}`).join(String(v)), s);
+function question(name, vars) {
+  const q = questionsDoc()[name];
+  return { type: 'noul', instructions: fill(q.ask, vars), criteria: { true: fill(q.yes, vars), false: fill(q.no, vars) } };
+}
 
 const cells = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
 const isSep = (line) => /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/.test(line);
@@ -83,22 +118,8 @@ export function reportProblems({ report, hash, criteria, fileExists }) {
 export function reportQuestions(criteria) {
   const q = {};
   criteria.forEach((c, i) => {
-    q[`met_${i + 1}`] = {
-      type: 'noul',
-      instructions: `Does \`report\` mark this completion criterion as met? Criterion: "${c}"`,
-      criteria: {
-        true: 'The report lists this criterion and marks it as met (충족).',
-        false: 'The report marks this criterion as not met (미충족), or does not list it.',
-      },
-    };
-    q[`evidence_${i + 1}`] = {
-      type: 'noul',
-      instructions: `Does \`report\` give a concrete evidence location for this completion criterion? Criterion: "${c}"`,
-      criteria: {
-        true: 'For this criterion the report names a file and line, a test name, or a command with its result.',
-        false: 'For this criterion the report gives no location, or only a general statement such as "done" or "checked".',
-      },
-    };
+    q[`met_${i + 1}`] = question('met', { 기준: c });
+    q[`evidence_${i + 1}`] = question('evidence', { 기준: c });
   });
   return q;
 }
@@ -131,22 +152,8 @@ export function proposalQuestions(units) {
   const q = {};
   units.forEach((u, ui) => (u.rows ?? []).forEach((r, i) => {
     const id = `${ui + 1}_${i + 1}`;
-    q[`decidable_${id}`] = {
-      type: 'noul',
-      instructions: `Could a reviewer decide, by looking at the finished work, whether this criterion is met or not? Criterion: "${r[0]}"`,
-      criteria: {
-        true: 'The criterion names an observable result, such as an output, a file, or a behavior that either happens or does not.',
-        false: 'The criterion is vague or a matter of taste, such as "works well" or "is clean", so two reviewers could disagree.',
-      },
-    };
-    q[`checkable_${id}`] = {
-      type: 'noul',
-      instructions: `Is this check something a person can actually run or look at? Check: "${r[1]}"`,
-      criteria: {
-        true: 'The check is a test name, a command to run, or "사용자가 직접 보고 확인한다" (the user looks at it directly).',
-        false: 'The check is missing, circular, or only says the work will be reviewed without saying how.',
-      },
-    };
+    q[`decidable_${id}`] = question('decidable', { 기준: r[0] });
+    q[`checkable_${id}`] = question('checkable', { '확인 방법': r[1] });
   }));
   return q;
 }

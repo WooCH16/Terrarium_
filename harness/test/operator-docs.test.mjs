@@ -61,7 +61,7 @@ test('report format: first line ## 결과 보고서 and one 커밋 해시 line (
 });
 
 test('coordinator lists the four script shapes and sends research through run-research', () => {
-  const c = read('coordinator.md');
+  const c = read('coordinator/AGENT.md');
   for (const shape of ['run-operator.mjs --issues', 'run-research.mjs --issue', 'run-reflect.mjs --handoff', 'stop-operator.mjs --handoff']) {
     assert.ok(c.includes(shape), shape);
   }
@@ -69,7 +69,7 @@ test('coordinator lists the four script shapes and sends research through run-re
 });
 
 test('coordinator spawns only advisor (ADR 0004: reviewer is not a subagent); operator agent file is gone', () => {
-  const c = read('coordinator.md');
+  const c = read('coordinator/AGENT.md');
   assert.match(c, /advisor만 부를 수 있다/);
   assert.doesNotMatch(c, /advisor, reviewer만/);
   assert.doesNotMatch(c, /subagent_type[^\n]*operator|오퍼레이터 하위 에이전트/);
@@ -77,11 +77,11 @@ test('coordinator spawns only advisor (ADR 0004: reviewer is not a subagent); op
 });
 
 test('issue template has a ## 의존하는 이슈 section', () => {
-  assert.match(read('coordinator.md'), /^## 의존하는 이슈$/m);
+  assert.match(read('coordinator/AGENT.md'), /^## 의존하는 이슈$/m);
 });
 
 test('coordinator.md: 작업 이슈는 진행중 라벨로 올리고, 보고서 없음은 issuecomment URL 유무로 판단한다', () => {
-  const c = read('coordinator.md');
+  const c = read('coordinator/AGENT.md');
   assert.match(c, /--label 진행중/);
   assert.match(c, /#issuecomment-/);
 });
@@ -89,7 +89,7 @@ test('coordinator.md: 작업 이슈는 진행중 라벨로 올리고, 보고서 
 test('I3: 같은 하달 재작업은 지원하지 않는다고 work.md·coordinator.md·docs/operator.md가 말한다', () => {
   assert.match(read('operator/work.md'), /재작업은 지원하지 않는다/);
   assert.doesNotMatch(read('operator/work.md'), /--handoff h<N>`\)\. 재작업 세션|## 재작업 세션/);
-  assert.match(read('coordinator.md'), /같은 하달.*재작업은 지원하지 않는다/);
+  assert.match(read('coordinator/AGENT.md'), /같은 하달.*재작업은 지원하지 않는다/);
   assert.match(readFileSync(join(harnessDir, '..', 'docs', 'operator.md'), 'utf8'), /같은 하달 안의 재작업은 지원하지 않는다/);
   assert.match(readFileSync(join(harnessDir, '..', 'docs', 'operator.md'), 'utf8'), /--force-restart/);
 });

@@ -90,7 +90,7 @@ node harness/e2e/verify.mjs --run C:/Users/<you>/my-run --since <시작 시각 I
 
 | 경로 | 내용 |
 |---|---|
-| `harness/` | 하네스 코드와 역할 문서(기준). `harness/coordinator.md`가 실행 폴더의 `CLAUDE.md`가 됩니다 |
+| `harness/` | 하네스 코드와 역할 문서(기준). 역할마다 `harness/<역할>/AGENT.md`(코디네이터, 어드바이저, 오퍼레이터, 워커, 리뷰어)가 있고 설계는 `docs/<역할>.md`입니다. 코디네이터 문서는 실행 폴더의 `CLAUDE.md`가 됩니다 |
 | `app/` | 데스크톱 앱(Electron) |
 | `docs/` | 정의, 설계, ADR, 확인과 실행 기록(`docs/checks/`) |
 | `index.html`, `css/`, `js/`, `assets/` | 관제탑 화면. 앱의 본창이며, 브라우저로 열면 목 데이터로 돕니다(`js/terminal.js`는 앱에서만 동작) |

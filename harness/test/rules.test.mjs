@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { loadCoordinatorConfig } from '../config.mjs';
 
 const harnessDir = join(dirname(fileURLToPath(import.meta.url)), '..');
-const doc = readFileSync(join(harnessDir, 'coordinator.md'), 'utf8');
+const doc = readFileSync(join(harnessDir, 'coordinator', 'AGENT.md'), 'utf8');
 const overview = readFileSync(join(harnessDir, '..', 'docs', '01-overview.md'), 'utf8');
 const config = loadCoordinatorConfig();
 

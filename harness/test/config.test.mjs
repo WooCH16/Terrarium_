@@ -52,7 +52,7 @@ test('오퍼레이터 설정과 코디네이터 규칙의 모델 목록이 허�
   const op = readJson('operator/operator.config.json');
   const used = [...op.allowedModels, ...Object.keys(op.runners), ...Object.keys(op.fallback), ...Object.values(op.fallback)];
   for (const m of used) assert.ok(allowed.includes(m), `operator.config.json의 ${m}`);
-  const line = readFileSync(join(harnessDir, 'coordinator.md'), 'utf8').split(/\r?\n/).find((l) => l.startsWith('- 워커 모델:'));
+  const line = readFileSync(join(harnessDir, 'coordinator', 'AGENT.md'), 'utf8').split(/\r?\n/).find((l) => l.startsWith('- 워커 모델:'));
   assert.ok(line, 'coordinator.md의 워커 모델 줄');
   assert.ok(!/codex/.test(line), line);
   for (const m of allowed) assert.ok(line.includes(`\`${m}\``), `${m}가 coordinator.md 워커 모델 줄에 있어야 한다`);

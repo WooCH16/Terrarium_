@@ -90,7 +90,7 @@ node harness/e2e/verify.mjs --run C:/Users/<you>/my-run --since <start time ISO>
 
 | Path | Contents |
 |---|---|
-| `harness/` | Harness code and role documents. `harness/coordinator.md` becomes the run folder's `CLAUDE.md` |
+| `harness/` | Harness code and role documents. Each role (coordinator, advisor, operator, worker, reviewer) has `harness/<role>/AGENT.md` and a design document `docs/<role>.md` (Korean). The coordinator document becomes the run folder's `CLAUDE.md` |
 | `app/` | Desktop app (Electron) |
 | `docs/` | Definition, designs, ADRs, checks and run records (`docs/checks/`) |
 | `index.html`, `css/`, `js/`, `assets/` | Control-tower screen. It is the app's main window; opened in a browser it runs on mock data (`js/terminal.js` only acts inside the app) |

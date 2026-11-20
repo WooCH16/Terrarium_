@@ -97,8 +97,8 @@ const fill = (text) => text
 
 // 2. 쓸 규칙·에이전트·설정을 먼저 만들고, 자리표시자가 남았으면 쓰기 전에 멈춘다.
 const roleFiles = new Map();
-roleFiles.set('CLAUDE.md', fill(readFileSync(`${harnessDir}/coordinator.md`, 'utf8')));
-roleFiles.set('.claude/agents/advisor.md', fill(readFileSync(advisorStub ? `${harnessDir}/stubs/advisor-stub.md` : `${harnessDir}/agents/advisor.md`, 'utf8')));
+roleFiles.set('CLAUDE.md', fill(readFileSync(`${harnessDir}/coordinator/AGENT.md`, 'utf8')));
+roleFiles.set('.claude/agents/advisor.md', fill(readFileSync(advisorStub ? `${harnessDir}/stubs/advisor-stub.md` : `${harnessDir}/advisor/AGENT.md`, 'utf8')));
 roleFiles.set('.claude/settings.json', JSON.stringify({
   permissions: { allow: ['Bash', 'Write', 'Edit', 'Read', 'Glob', 'Grep', 'Agent', 'TodoWrite'] },
   hooks: {

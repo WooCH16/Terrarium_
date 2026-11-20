@@ -6,7 +6,10 @@
 
 | 파일 | 하는 일 |
 |---|---|
-| `coordinator.md` | 코디네이터 규칙. 실행 폴더의 `CLAUDE.md`가 됩니다 |
+| `coordinator/AGENT.md` | 코디네이터 규칙. 실행 폴더의 `CLAUDE.md`가 됩니다(설계: `docs/coordinator.md`) |
+| `advisor/AGENT.md` | 어드바이저 정의. 실행 폴더의 `.claude/agents/advisor.md`가 됩니다(설계: `docs/advisor.md`) |
+| `worker/AGENT.md` | 워커 규칙. `run-worker.mjs`가 워커 입력 맨 앞에 붙입니다(설계: `docs/worker.md`) |
+| `reviewer/AGENT.md` | 리뷰어(Jev) 규칙과 판정 질문. `jev-review.mjs`가 질문 절을 읽습니다(설계: `docs/reviewer.md`) |
 | `agents/*.md` | 하위 에이전트: advisor 하나. ADR 0004 결정 B에 따라 리뷰어는 하위 에이전트가 아니라 별도 실행(`run-reviewer`)이고, 코디네이터는 리뷰어를 하위 에이전트로 부르지 못합니다(훅이 막음). 쓰이지 않던 v1 리뷰어 정의(`reviewer.md`)는 지웠습니다(소유자 결정 5-1). 워커는 하위 에이전트가 아니라 `run-worker`가 띄우는 별도 실행입니다 |
 | `operator/AGENT.md`, `operator/{work,research,reflect}.md` | 오퍼레이터 세션의 규칙과 모드별 절차. 오퍼레이터는 하위 에이전트가 아니라 `run-operator`·`run-research`로 시작하는 독립 세션입니다. `reflect.md`는 `run-reflect`가 코드로 하는 일을 적은 것입니다 |
 | `operator/*.mjs` | 오퍼레이터 스크립트(시작, 워커, 리뷰어, 합치기, 반영, 중단). 설정은 `operator/operator.config.json` |
