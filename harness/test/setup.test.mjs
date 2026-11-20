@@ -44,6 +44,9 @@ test('settings hook points at guard with absolute config', () => {
   const settings = JSON.parse(readFileSync(join(run, '.claude/settings.json'), 'utf8'));
   const cmd = settings.hooks.PreToolUse[0].hooks[0].command;
   assert.equal(settings.hooks.PreToolUse[0].matcher, '*');
+  // 컴팩션 알림 훅(소유자 결정 8-20)
+  assert.equal(settings.hooks.SessionStart[0].matcher, 'compact');
+  assert.match(settings.hooks.SessionStart[0].hooks[0].command, /compact-notice.mjs" --config ".*harness.json"$/);
   assert.match(cmd, /guard\.mjs" --config ".*\/harness\.json"$/);
   assert.equal(settings.env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH, '2');
 });

@@ -106,6 +106,11 @@ roleFiles.set('.claude/settings.json', JSON.stringify({
       matcher: '*',
       hooks: [{ type: 'command', command: `node "${harnessDir}/guard.mjs" --config "${run}/harness.json"` }],
     }],
+    // 컴팩션이 끝나면 압축 후 검증을 하라는 알림과 보존 노트 경로를 대화에 넣는다(소유자 결정 8-20, run-18).
+    SessionStart: [{
+      matcher: 'compact',
+      hooks: [{ type: 'command', command: `node "${harnessDir}/compact-notice.mjs" --config "${run}/harness.json"` }],
+    }],
   },
   // 사용자 전역 CLAUDE.md와 실행 폴더 상위의 CLAUDE.md가 코디네이터 규칙에 섞이지 않게 한다(이슈 #22)
   claudeMdExcludes: claudeMdExcludes(run),

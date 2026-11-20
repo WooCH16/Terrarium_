@@ -75,12 +75,24 @@ export async function startAndWait({ run, harnessDir, entry, args, env = process
   // Windows에서 detached가 아니면 Node(libuv)가 자식을 작업 객체에 넣어 부모가 끝날 때 같이 죽인다(run-8에서 재현). 그래서 detached로 띄운다.
   // 그런데 detached 프로세스는 콘솔이 없어, 그 아래에서 부르는 git이 가끔 콘솔 닫힘(0xC000013A)으로 죽는다.
   // 그래서 detached 자식(--bg-token)은 숨은 콘솔을 가진 손자(--bg-run)를 하나 띄워 기다리기만 하고, 일은 손자가 한다.
-  const child = spawn(process.execPath, [entry, '--bg-token', token, ...args], { cwd: process.cwd(), env, detached: true, stdio: 'ignore', windowsHide: true });
+  // 바로 detached 자식을 띄우지 않고, 띄우기만 하고 곧 끝나는 발사 프로세스(--bg-launch)를 거친다.
+  // 코디네이터가 Esc로 턴을 끊으면 Claude Code가 이 부모의 프로세스 트리를 통째로 끝낸다. detached여도 부모가 살아 있으면
+  // 트리에 걸려 하달이 같이 죽었다(run-18 h5, 2026-11-20). 발사 프로세스가 먼저 끝나면 detached 자식은 부모 없는 프로세스가 되어 트리 밖에 있다.
+  const launcher = spawn(process.execPath, [entry, '--bg-launch', token, ...args], { cwd: process.cwd(), env, detached: true, stdio: 'ignore', windowsHide: true });
+  launcher.on?.('error', () => {});
+  // 첫 기록부터 pid를 남긴다: 자식이 자기 기록을 쓰기 전에 죽어도 기다리는 쪽이 알아챈다(fable 조언 2). 발사 프로세스가 곧 자식 pid로 바꿔 쓴다.
+  writeBg(run, token, { done: false, pid: launcher.pid ?? null, startedAt: new Date().toISOString() });
+  launcher.unref?.();
+  return report(await waitFor(run, token, { waitMs: waitMsOf(env) }), { token, harnessDir, write });
+}
+
+// 발사 프로세스: detached 자식을 띄우고, 기다리는 쪽이 볼 pid를 자식 것으로 바꿔 쓴 뒤 바로 끝난다.
+export function runLauncher({ run, token, entry, argv, env, spawn = nodeSpawn }) {
+  const child = spawn(process.execPath, [entry, '--bg-token', token, ...argv], { cwd: process.cwd(), env, detached: true, stdio: 'ignore', windowsHide: true });
   child.on?.('error', () => {});
-  // 첫 기록부터 자식 pid를 남긴다: 자식이 자기 기록을 쓰기 전에 죽어도 기다리는 쪽이 알아챈다(fable 조언 2).
   writeBg(run, token, { done: false, pid: child.pid ?? null, startedAt: new Date().toISOString() });
   child.unref?.();
-  return report(await waitFor(run, token, { waitMs: waitMsOf(env) }), { token, harnessDir, write });
+  return 0;
 }
 
 // detached 자식: 손자를 띄우고 끝을 기다린다. 손자가 결과를 못 쓰고 끝나면 대신 오류 결과를 쓴다.
@@ -108,12 +120,13 @@ export async function runChild({ run, token, main, argv, env }) {
 // run-operator·run-research의 명령줄 진입점. --bg-token이 있으면 자식, HARNESS_FOREGROUND=1이면 예전처럼 그 자리에서 돈다.
 export async function cliEntry({ main, entry, argv = process.argv.slice(2), env = process.env }) {
   const run = fwd(env.HARNESS_RUN_DIR || process.cwd());
-  for (const flag of ['--bg-token', '--bg-run']) {
+  for (const flag of ['--bg-launch', '--bg-token', '--bg-run']) {
     const t = argv.indexOf(flag);
     if (t === -1) continue;
     const token = argv[t + 1];
     if (!TOKEN.test(token ?? '')) { console.log('오류: 대기 번호 모양이 올바르지 않습니다.'); return 2; }
     const rest = argv.filter((_, i) => i !== t && i !== t + 1);
+    if (flag === '--bg-launch') return runLauncher({ run, token, entry, argv: rest, env });
     return flag === '--bg-token' ? runDetached({ run, token, entry, argv: rest, env }) : runChild({ run, token, main, argv: rest, env });
   }
   if (env.HARNESS_FOREGROUND === '1') return main(argv, env);

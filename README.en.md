@@ -53,7 +53,7 @@ First use:
 1. **[설정 > 계정]** (Settings > Accounts): log in to Claude Code, GitHub, and Pi with the login buttons. Enter API keys, type the designated repository (`<owner>/<name>`), and press **사전 점검** (preflight check). The coordinator terminal opens only after this check passes.
 2. **[설정 > 실행 폴더 설치]** (Settings > Run folder setup): enter the designated repository, a run folder name, and the target project (a git folder with a `main` branch; leave empty for the sample memo program), then press **설치** (Install).
 3. **ORCHESTRA pane** in the main window: when the terminal appears, talk to the coordinator. The first time, Claude Code asks whether you trust the folder. **The default selection is "No", so pressing Enter alone chooses No. Move down to "Yes, I trust this folder" and press Enter.** With No, the allow list does not apply and the harness hooks may not run.
-   - Esc interrupts a turn, and Claude Code commands such as `/compact` work as usual. **Do not press Esc while a handoff is running**: it kills the whole handoff. To stop a handoff, ask the coordinator to stop it (`stop-operator`).
+   - Esc interrupts a turn, and Claude Code commands such as `/compact` work as usual. Pressing Esc while a handoff is running does not stop the handoff; on the next turn the coordinator picks it up again. To stop a handoff, ask the coordinator to stop it (`stop-operator`), not Esc.
    - When the coordinator exits, press Enter in the terminal to reopen the same conversation, or N for a new one.
    - When you restart the app, it reopens the previous conversation for that run folder.
 
