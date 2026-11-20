@@ -414,8 +414,8 @@ test('worker: legacy agent_type worker under a role session uses config.worktree
 
 test('worker: other tools denied', () => {
   for (const t of ['Agent', 'Task', 'WebFetch', 'Skill', 'PowerShell', 'WebSearch']) {
-    // Agent/Task는 공통 검사(commonChecks)가 먼저 막고, 나머지는 워커 프로필이 막는다
-    wDeny(wdec(wop(t, { subagent_type: 'worker', prompt: 'x', command: 'x' })), t === 'Agent' || t === 'Task' ? /부를 수 없다/ : /워커는 .* 도구를 쓸 수 없다/, t);
+    // 역할 세션의 Agent/Task도 워커 프로필이 막는다(공통 검사는 코디네이터 기준이라 역할 세션에서는 끼어들지 않는다, run-18 h16)
+    wDeny(wdec(wop(t, { subagent_type: 'worker', prompt: 'x', command: 'x' })), /워커는 .* 도구를 쓸 수 없다/, t);
   }
 });
 
@@ -713,4 +713,10 @@ test('2.9 근사: 작업·조사 모드는 첫 줄이 `## 리뷰어 판정`인 �
   }
   ok(decide(op('Bash', { command: cmd('ok') }), config, d));
   ok(decide(op('Bash', { command: cmd('ok') }), rcfg, d));
+});
+
+test('research: 하위 에이전트(web-fetch)는 거부하고, 거부 문구에 코디네이터가 아니라 조사 역할이 적힌다(run-18 h16)', () => {
+  const r = rop('Agent', { subagent_type: 'web-fetch', prompt: 'x' });
+  assert.equal(r.allow, false);
+  assert.doesNotMatch(r.reason, /coordinator/);
 });

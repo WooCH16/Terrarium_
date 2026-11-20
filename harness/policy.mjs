@@ -187,7 +187,9 @@ function commonChecks(input, config, deps) {
     }
   }
   if (findSecret(writtenText(tool, toolInput))) return deny('비밀값으로 보이는 문자열은 쓰지 않는다. 존재와 용도만 적어라');
-  if (tool === 'Agent' || tool === 'Task') {
+  // 역할이 있는 세션(오퍼레이터)의 하위 에이전트는 그 역할 프로필이 막고 자기 문구를 낸다. 여기서 코디네이터로 보면
+  // 거부 문구에 coordinator가 찍힌다(run-18 h16, 조사 세션의 web-fetch).
+  if ((tool === 'Agent' || tool === 'Task') && !(config.role && !input.agent_type)) {
     const who = input.agent_type ?? 'coordinator';
     const allowed = SPAWNABLE[who];
     if (!allowed || !allowed.has(toolInput.subagent_type)) {

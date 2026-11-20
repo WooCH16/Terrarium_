@@ -29,14 +29,16 @@ function parseArgs(argv) {
 export function defaultKill(pid, { platform = process.platform, exec = run1 } = {}) {
   if (platform === 'win32') {
     const sys = win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
-    const listed = String(exec(win32.join(sys, 'tasklist.exe'), ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'])).trim();
-    const image = /^"([^"]*)"/.exec(listed)?.[1];
+    const imageOf = () => /^"([^"]*)"/.exec(String(exec(win32.join(sys, 'tasklist.exe'), ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'])).trim())?.[1];
+    const image = imageOf();
     if (image === undefined) return; // 해당 pid의 프로세스 없음(이미 끝남)
     if (!ALLOWED_IMAGE.test(image)) throw new Error(`pid ${pid}의 이미지가 ${ONE_LINE(image).slice(0, 40)}입니다(node/claude가 아니라 종료를 거부함)`);
     try {
       exec(win32.join(sys, 'taskkill.exe'), ['/T', '/F', '/PID', String(pid)]);
     } catch (e) {
       if (e.status === 128) return; // 해당 프로세스 없음
+      // 앞서 죽인 트리에 들어 있어 끝나는 중이면 taskkill이 1로 끝난다(run-18 h11). 그 pid가 이제 없으면 성공이다.
+      if (imageOf() === undefined) return;
       throw e;
     }
     return;

@@ -313,6 +313,15 @@ test('stop-operator: pid 1, 자기 pid, 부모 pid는 거부, pid는 64개까지
   assert.equal(k, 0);
 });
 
+test('defaultKill(win32): 트리째 죽이는 중이라 taskkill이 실패해도 그 pid가 이미 없으면 성공으로 본다(run-18 h11)', () => {
+  // 오퍼레이터를 /T로 먼저 죽이면 같은 트리의 워커도 끝나는 중이고, 바로 이어 부른 taskkill은 1로 끝날 수 있다.
+  const seq = (lists) => { let i = 0; return (file) => { if (/tasklist/i.test(file)) return lists[Math.min(i++, lists.length - 1)]; const e = new Error('Command failed: taskkill'); e.status = 1; throw e; }; };
+  const node = '"node.exe","45808","Console","1","30,000 K"';
+  const none = 'INFO: No tasks are running which match the specified criteria.';
+  defaultKill(45808, { platform: 'win32', exec: seq([node, none]) });
+  assert.throws(() => defaultKill(45808, { platform: 'win32', exec: seq([node, node]) }), /taskkill/);
+});
+
 test('defaultKill(win32): tasklist 이미지 이름이 node/claude일 때만 taskkill, 다르면 거부, 없으면 통과', () => {
   const calls = [];
   const mk = (stdout) => (file, args) => { calls.push([file, args]); return file.toLowerCase().includes('tasklist') ? stdout : ''; };
