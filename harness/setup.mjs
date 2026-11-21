@@ -107,7 +107,11 @@ const advisorSkills = advisorStub ? [] : skillNames('advisor');
 roleFiles.set('.claude/agents/advisor.md', withSkills(fill(readFileSync(advisorStub ? `${harnessDir}/stubs/advisor-stub.md` : `${harnessDir}/advisor/AGENT.md`, 'utf8')), advisorSkills));
 for (const role of ['coordinator', 'advisor']) {
   if (role === 'advisor' && advisorStub) continue;
-  for (const name of skillNames(role)) roleFiles.set(`.claude/skills/${name}/SKILL.md`, fill(readFileSync(`${harnessDir}/${role}/skills/${name}/SKILL.md`, 'utf8')));
+  // SKILL.md 옆의 참고 파일(예: advisor-domain-knowledge/knowledge/*.md)도 같은 자리에 설치한다. 미리 주입되는 것은 SKILL.md뿐이고, 참고 파일은 필요할 때 Read로 읽는다.
+  for (const name of skillNames(role)) {
+    const d = `${harnessDir}/${role}/skills/${name}`;
+    for (const rel of readdirSync(d, { recursive: true }).map((p) => p.replaceAll('\\', '/')).filter((p) => p.endsWith('.md')).sort()) roleFiles.set(`.claude/skills/${name}/${rel}`, fill(readFileSync(`${d}/${rel}`, 'utf8')));
+  }
 }
 roleFiles.set('.claude/settings.json', JSON.stringify({
   permissions: { allow: ['Bash', 'Write', 'Edit', 'Read', 'Glob', 'Grep', 'Agent', 'TodoWrite'] },

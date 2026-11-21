@@ -90,3 +90,35 @@ test('훅: 코디네이터는 자기 스킬은 부르고 다른 역할의 스킬
   assert.equal(call('coordinator-handoff').allow, true);
   for (const n of ['advisor-proposal', 'operator-work', 'worker-issue', 'reviewer-verdict']) assert.equal(call(n).allow, false, n);
 });
+
+test('분야 지식: setup이 지식 파일을 스킬 옆에 설치하고, 스킬이 가리키는 경로는 설치된 파일이며 어드바이저는 읽기만 할 수 있다', () => {
+  const run = join(mkdtempSync(join(tmpdir(), 'knowledge-')), 'run').replaceAll('\\', '/');
+  const r = spawnSync(process.execPath, [join(harnessDir, 'setup.mjs'), '--run', run, '--repo', 'owner/harness-issues', '--no-clone'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const src = join(harnessDir, 'advisor/skills/advisor-domain-knowledge/knowledge');
+  const ids = readdirSync(src).filter((n) => n.endsWith('.md')).sort();
+  assert.deepEqual(ids, ['app.md', 'design.md', 'game.md', 'marketing.md', 'security.md', 'web.md']);
+  for (const id of ids) {
+    const t = readFileSync(join(src, id), 'utf8');
+    assert.doesNotMatch(t, /\{\{|[A-Za-z]:[\\/]Users[\\/]|\/home\/|@[a-z0-9-]+\.(com|net|org)/i, id);
+    assert.ok(t.length > 3000, `${id}: 내용이 너무 짧다`);
+  }
+  const skill = readFileSync(join(run, '.claude/skills/advisor-domain-knowledge/SKILL.md'), 'utf8');
+  const paths = [...skill.matchAll(/`([^`]+\/knowledge\/[a-z]+\.md)`/g)].map((m) => m[1]);
+  assert.equal(paths.length, ids.length);
+  const config = { harnessDir: 'C:/h', runDir: run, issuesClone: `${run}/issues`, targetProject: `${run}/memo`, designatedRepo: 'o/r' };
+  const as = (tool_name, tool_input) => decide({ tool_name, tool_input, cwd: run, agent_type: 'advisor' }, config, { visibility: () => 'PRIVATE', readFile: () => { throw new Error('x'); } });
+  for (const p of paths) {
+    assert.ok(existsSync(p), p);
+    assert.equal(as('Read', { file_path: p }).allow, true, p);
+    assert.equal(as('Write', { file_path: p, content: 'x' }).allow, false, p);
+  }
+});
+
+test('분야 지식: 어드바이저 대역(--advisor-stub)에는 지식 파일을 설치하지 않는다', () => {
+  const run = join(mkdtempSync(join(tmpdir(), 'knowledge-stub-')), 'run');
+  const r = spawnSync(process.execPath, [join(harnessDir, 'setup.mjs'), '--run', run, '--repo', 'owner/harness-issues', '--no-clone', '--advisor-stub'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!existsSync(join(run, '.claude/skills/advisor-domain-knowledge')));
+  assert.doesNotMatch(readFileSync(join(run, '.claude/agents/advisor.md'), 'utf8'), /advisor-domain-knowledge/);
+});
