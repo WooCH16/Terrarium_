@@ -18,7 +18,7 @@ user-invocable: false
 
 ## 제안문 (`run-reviewer.mjs --advice <파일> --advice-id <id>`)
 
-1. 같은 조언 id의 판정 횟수를 `advice-log.jsonl`에서 센다. 2번을 넘으면 판정하지 않고 종료 코드 7.
+1. 같은 조언 id의 **거부** 횟수를 `advice-log.jsonl`에서 센다. 이미 2번 거부됐으면 판정하지 않고 종료 코드 7.
 2. **코드 검사:** `## 작업 단위` 절마다 정해진 칸, `| 기준 | 확인 방법 |` 표, 빈칸.
 3. 기준 한 줄마다 `decidable`, `checkable` 질문을 묻는다.
 4. 결정 규칙은 결과 보고서와 같다. 허용이면 제안문을 `handoffs/advice-<해시 앞 8자리>.md`로 옮기고 해시를 기록한다.

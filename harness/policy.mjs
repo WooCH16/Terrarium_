@@ -240,6 +240,19 @@ function coordinatorGh(tokens, config, deps) {
   for (const f of bodyFiles(tokens)) {
     if (!isInside(f, `${config.issuesClone}/.drafts`)) return deny(`본문 파일은 ${config.issuesClone}/.drafts/ 안에 둔다`);
   }
+  // 판정은 리뷰어, 결과 보고서는 오퍼레이터의 일이다: 코디네이터 댓글이 그 머리줄로 시작하면 거부한다(제로폭·전각 문자 위장 포함).
+  if (sub === 'comment') {
+    const texts = [];
+    for (let i = 0; i < tokens.length; i++) {
+      if (tokens[i] === '--body' || tokens[i] === '-b') texts.push(tokens[i + 1] ?? '');
+      else if (tokens[i].startsWith('--body=')) texts.push(tokens[i].slice(7));
+    }
+    for (const f of bodyFiles(tokens)) { try { texts.push(String(deps.readFile(f))); } catch { /* 읽을 수 없는 본문 파일은 gh가 실패한다 */ } }
+    for (const text of texts) {
+      const lead = String(text).split(/\r?\n/).map((l) => l.replace(/\p{Cf}/gu, '').normalize('NFKC')).find((l) => l.trim() !== '') ?? '';
+      if (/^\s*#{1,6}\s*(리뷰어\s*판정|결과\s*보고서)/.test(lead)) return deny('리뷰어 판정과 결과 보고서 댓글은 코디네이터가 올리지 않는다. 판정은 리뷰어(run-reviewer), 보고서는 오퍼레이터의 일이다');
+    }
+  }
   if (GH_ISSUE_WRITE.has(sub)) {
     const vis = deps.visibility(config.designatedRepo);
     if (vis !== 'PRIVATE') return publicDeny(vis);
@@ -305,18 +318,18 @@ const globNamesSecret = (g) => {
   return isSecretFileName(seg.replace(/\*/g, '')) || isSecretFileName(seg.replace(/\*/g, 'x'));
 };
 
-// Read·Grep가 비밀값 파일(.env, 키 파일 등)을 읽거나 검색하지 못하게 한다. 코디네이터와 하위 에이전트에 같이 쓴다.
+// Read·Grep가 비밀값 파일(.env, 키 파일 등)을 읽거나 검색하지 못하게 한다. 코디네이터, 그 하위 에이전트, 조사 모드 오퍼레이터에 같이 쓴다.
 function secretReadCheck(input, config, deps) {
   const toolInput = input.tool_input || {};
   const target = toolInput.file_path ?? toolInput.path;
   if (target) {
     const abs = resolveFrom(input.cwd || config.runDir, target);
     if (isSecretFile(abs) || isSecretFile(realOf(abs, deps))) {
-      return deny('코디네이터는 비밀값 파일(.env, 키 파일 등)을 읽지 않는다. 존재와 용도만 확인하고 값은 보지 마라');
+      return deny('비밀값 파일(.env, 키 파일 등)은 읽지 않는다. 존재와 용도만 확인하고 값은 보지 마라');
     }
   }
   if (input.tool_name === 'Grep' && toolInput.glob && globNamesSecret(toolInput.glob)) {
-    return deny('코디네이터는 비밀값 파일(.env, 키 파일 등)을 검색하지 않는다');
+    return deny('비밀값 파일(.env, 키 파일 등)은 검색하지 않는다');
   }
   return null;
 }
@@ -366,6 +379,8 @@ export function decide(input, config, deps) {
     }
     const role = roleOf(input, config);
     if (role === 'operator-work') return decideOperatorWork(input, config, deps, PROFILE_HELPERS);
+    // 조사 모드는 웹을 읽으므로(웹 글이 지시처럼 보일 수 있다) 비밀값 파일도 읽지 못하게 훅으로 막는다(작업 모드·워커는 docs/operator.md 9.3대로 참조 가능).
+    if (role === 'operator-research' && (tool === 'Read' || tool === 'Grep' || tool === 'Glob')) { const s = secretReadCheck(input, config, deps); if (s) return s; }
     if (role === 'operator-research') return decideOperatorResearch(input, config, deps, PROFILE_HELPERS);
     if (role === 'operator-reflect') return decideOperatorReflect(input, config, deps, PROFILE_HELPERS);
     if (role === 'worker') return decideWorker(input, config, deps, PROFILE_HELPERS);

@@ -114,7 +114,7 @@ for (const role of ['coordinator', 'advisor']) {
   }
 }
 roleFiles.set('.claude/settings.json', JSON.stringify({
-  permissions: { allow: ['Bash', 'Write', 'Edit', 'Read', 'Glob', 'Grep', 'Agent', 'TodoWrite'] },
+  permissions: { allow: ['Bash', 'Write', 'Edit', 'Read', 'Glob', 'Grep', 'Agent', 'TodoWrite', 'Skill'] },
   hooks: {
     PreToolUse: [{
       matcher: '*',

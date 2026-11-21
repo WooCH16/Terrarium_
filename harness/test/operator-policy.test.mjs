@@ -539,8 +539,8 @@ test('research: missing or invalid issue/handoff denies every tool', () => {
   }
 });
 
-test('research: read tools allowed including .env', () => {
-  ok(rop('Read', { file_path: `${memo}/.env` }));
+test('research: read tools allowed (비밀값 파일은 아래 테스트처럼 거부)', () => {
+  ok(rop('Read', { file_path: `${memo}/src/memo.mjs` }));
   ok(rop('Grep', { pattern: 'x', path: memo }));
   ok(rop('Glob', { pattern: '**/*.mjs', path: memo }));
 });
@@ -732,4 +732,14 @@ test('research: 웹 읽기(WebFetch·WebSearch, web-fetch 하위 에이전트)�
   assert.doesNotMatch(r.reason, /coordinator/);
   // 반영 모드에는 웹 읽기를 주지 않는다.
   denies(decide({ ...op('WebFetch', { url: 'https://example.com' }), agent_type: 'web-fetch' }, fcfg, rdeps()), /agent_type\(web-fetch\)/);
+});
+
+test('research: 비밀값 파일은 읽거나 검색하지 못한다(웹을 읽는 모드라 훅으로 막는다, 제미나이 검토 1)', () => {
+  for (const p of ['.env', 'id_rsa', 'server.pem', '.npmrc', 'credentials.json']) no(rop('Read', { file_path: `${memo}/${p}` }));
+  no(rop('Grep', { pattern: 'KEY', path: `${memo}/.env` }));
+  no(rop('Grep', { pattern: 'KEY', path: memo, glob: '.env*' }));
+  ok(rop('Read', { file_path: `${memo}/.env.example` }));
+  ok(rop('Read', { file_path: `${memo}/src/memo.mjs` }));
+  const r = rop('Read', { file_path: `${memo}/.env` });
+  assert.doesNotMatch(r.reason, /코디네이터/);
 });

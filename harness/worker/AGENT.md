@@ -13,7 +13,7 @@
 
 - **자기 워크트리 안만** 고친다. 워크트리 밖(대상 프로젝트 본 폴더, 다른 이슈의 워크트리, 하네스, 실행 폴더)에는 쓰지 않는다.
 - 이 워크트리의 이슈 브랜치에 커밋한다. `main`은 바꾸지 않는다.
-- `.claude/`, `CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md`, `.mcp.json`, `.harness/`는 커밋하지 않는다. 스크립트가 이 이름이 들어간 커밋을 거부한다.
+- `.claude/`, `CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md`, `.mcp.json`, `.harness/`, `.gitmodules`, `.gitattributes`는 커밋하지 않는다. 스크립트가 이 이름이 들어간 커밋을 거부한다.
 
 ## 밖으로 내보내지 않기
 
