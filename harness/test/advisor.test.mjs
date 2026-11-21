@@ -33,3 +33,29 @@ test('D2: 정의의 제안문 양식을 채우면 코드 검사(proposalProblems
     .replace('<그 줄만으로 실행할 수 있는 명령이나 시험 이름>', '`node --test test/sort.test.mjs`');
   assert.deepEqual(proposalProblems(block).problems, []);
 });
+
+test('패널(결정 8-24): 어드바이저는 패널 폴더에 초안을 쓰고 서로 읽을 수 있지만, 패널 초안으로는 판정 명령을 실행할 수 없다', () => {
+  const as = (tool_name, tool_input) => decide({ tool_name, tool_input, cwd: config.runDir, agent_type: 'advisor' }, config, { visibility: () => 'PRIVATE', readFile: () => { throw new Error('x'); } });
+  const panel = 'C:/run/reviewer-inbox/panel/adv-sort-1';
+  for (const seat of ['a', 'b', 'c']) {
+    assert.equal(as('Write', { file_path: `${panel}/${seat}.md`, content: 'x' }).allow, true, seat);
+    assert.equal(as('Read', { file_path: `${panel}/${seat}.md` }).allow, true, seat);
+  }
+  const judge = (file) => as('Bash', { command: `node C:/h/operator/run-reviewer.mjs --advice ${file} --advice-id adv-sort-1` });
+  assert.equal(judge(`${panel}/a.md`).allow, false, '패널 초안은 판정에 바로 올릴 수 없다');
+  assert.equal(judge('C:/run/reviewer-inbox/adv-sort-1.md').allow, true, '최종 제안문은 지금처럼 판정받는다');
+  assert.equal(as('Write', { file_path: 'C:/run/memo/panel.md', content: 'x' }).allow, false);
+});
+
+test('패널(결정 8-24): 코디네이터 정의·조언 스킬·어드바이저 정의가 같은 단계 이름을 쓴다', () => {
+  const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), 'utf8');
+  const coord = read('../coordinator/skills/coordinator-advice/SKILL.md');
+  const panel = read('../advisor/skills/advisor-panel/SKILL.md');
+  for (const stage of ['패널 단계: 초안', '패널 단계: 교환', '패널 단계: 최종']) {
+    assert.ok(coord.includes(stage), `coordinator-advice: ${stage}`);
+    assert.ok(panel.includes(stage), `advisor-panel: ${stage}`);
+  }
+  assert.match(text, /패널 단계: 초안\|교환\|최종/);
+  assert.match(coord, /조언 id는 넘기지 않는다/);
+  assert.match(panel, /판정 명령을 실행하지 않는다/);
+});
