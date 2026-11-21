@@ -569,3 +569,7 @@ test('코디네이터는 리뷰어 판정·결과 보고서 머리줄로 시작�
   ok(c(`gh issue comment 3 --repo ${config.designatedRepo} --body-file ${drafts}/c.md`));
   ok(c(`gh issue comment 3 --repo ${config.designatedRepo} --body "확인했다"`));
 });
+
+test('코디네이터는 선호 문서(records/preferences.md)를 쓸 수 있다(제미나이 검토 23)', () => {
+  ok(decide(coord('Write', { file_path: `${config.issuesClone}/records/preferences.md`, content: 'x' }), config, deps()));
+});

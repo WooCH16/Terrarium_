@@ -743,3 +743,9 @@ test('research: 비밀값 파일은 읽거나 검색하지 못한다(웹을 읽�
   const r = rop('Read', { file_path: `${memo}/.env` });
   assert.doesNotMatch(r.reason, /코디네이터/);
 });
+
+test('research: git으로 비밀값 파일 경로를 찍어 읽는 모양은 거부한다(커밋된 비밀값의 git show HEAD는 한계로 기록)', () => {
+  no(rop('Bash', { command: `git -C ${memo} show HEAD:.env` }));
+  no(rop('Bash', { command: `git -C ${memo} diff HEAD -- .env` }));
+  no(rop('Bash', { command: `git -C ${memo} log -p` }));
+});
