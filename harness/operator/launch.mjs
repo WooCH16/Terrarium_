@@ -13,7 +13,7 @@ const MODES = ['work', 'research', 'reflect'];
 const HANDOFF = /^h[1-9]\d*$/;
 const TOOLS = {
   work: 'Bash Write Edit Read Glob Grep',
-  research: 'Bash Write Read Glob Grep',
+  research: 'Bash Write Read Glob Grep WebFetch WebSearch Agent',
   reflect: 'Bash Write Read Glob Grep',
 };
 

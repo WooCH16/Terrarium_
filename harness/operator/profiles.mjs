@@ -413,7 +413,11 @@ export function decideOperatorResearch(input, config, deps, h) {
       (tokens, cwd) => (tokens[0] === 'gh' && tokens[1] === 'issue' ? researchGh(tokens, config, deps, h, cwd) : null));
   }
   if (tool === 'Write' || tool === 'Edit' || tool === 'MultiEdit' || tool === 'NotebookEdit') return draftsOnlyWrite(input, config, deps, h, '조사');
-  if (tool === 'Agent' || tool === 'Task') return deny('조사 모드는 하위 에이전트를 부르지 않는다');
+  // 웹 읽기는 소유자가 허용했다(run-18 #42·#43: 자료 요청은 대개 바깥 서비스의 동작을 묻는다).
+  // 직접 도구가 없는 환경에서는 web-fetch 하위 에이전트로 읽는다. 그 안에서는 웹 읽기 도구만 쓴다(decide).
+  if (tool === 'WebFetch' || tool === 'WebSearch') return allow();
+  if ((tool === 'Agent' || tool === 'Task') && input.tool_input?.subagent_type === 'web-fetch') return allow();
+  if (tool === 'Agent' || tool === 'Task') return deny('조사 모드는 웹 읽기(web-fetch) 말고는 하위 에이전트를 부르지 않는다');
   return deny(`조사 모드는 ${tool} 도구를 쓸 수 없다`);
 }
 

@@ -356,6 +356,10 @@ export function decide(input, config, deps) {
   const common = commonChecks(input, config, deps);
   if (common) return common;
   if (config.role) {
+    // 조사 세션의 web-fetch 하위 에이전트는 웹 읽기 도구만 쓴다.
+    if (config.role === 'operator-research' && input.agent_type === 'web-fetch') {
+      return tool === 'WebFetch' || tool === 'WebSearch' ? allow() : deny(`조사 모드의 web-fetch 에이전트는 ${tool} 도구를 쓸 수 없다`);
+    }
     if (input.agent_type && input.agent_type !== 'worker') return deny(`역할이 있는 세션은 알 수 없는 agent_type(${input.agent_type})을 허용하지 않는다`);
     if ((config.role === 'operator-research' || config.role === 'operator-reflect') && input.agent_type) {
       return deny(`${config.role} 역할은 하위 에이전트(${input.agent_type})를 허용하지 않는다`);

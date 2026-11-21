@@ -244,13 +244,13 @@ test('M3: 성공한 세션의 세션 폴더는 지우고, 실패한 세션의 �
   assert.equal(existsSync(sessionCwd(ctx.run, 'h1')), true);
 });
 
-test('launchSession: research 모드는 Edit 없이 도구를 준다', async () => {
+test('launchSession: research 모드는 Edit 없이 웹 읽기까지 도구를 준다', async () => {
   const ctx = makeRun();
   mkdirSync(`${ctx.run}/handoffs/h2`, { recursive: true });
   const fake = fakeEnv();
   await launchSession({ mode: 'research', handoff: 'h2', run: ctx.run, harnessDir: ctx.harnessDir, issue: 9, prompt: 'p', timeoutMs: 20000 });
   const [c] = fake.calls();
-  assert.equal(c.args[c.args.indexOf('--allowedTools') + 1], 'Bash Write Read Glob Grep');
+  assert.equal(c.args[c.args.indexOf('--allowedTools') + 1], 'Bash Write Read Glob Grep WebFetch WebSearch Agent');
   assert.ok(readFileSync(`${ctx.run}/handoffs/h2/settings-research.json`, 'utf8').includes('--issue 9'));
 });
 

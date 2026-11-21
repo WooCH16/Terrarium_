@@ -617,7 +617,6 @@ test('research: everything else, chaining, other tools denied', () => {
   denies(rop('Task', { subagent_type: 'advisor', prompt: 'x' }), /하위 에이전트/);
   denies(rop('Agent', { subagent_type: 'worker', prompt: 'x' }), /에이전트/);
   denies(rop('PowerShell', { command: 'ls' }), /조사 모드/);
-  denies(rop('WebFetch', { url: 'http://x' }), /조사 모드/);
   denies(decide({ ...op('Read', { file_path: 'a' }), agent_type: 'worker' }, rcfg, rdeps()), /agent_type|worker|조사/);
 });
 
@@ -715,8 +714,22 @@ test('2.9 근사: 작업·조사 모드는 첫 줄이 `## 리뷰어 판정`인 �
   ok(decide(op('Bash', { command: cmd('ok') }), rcfg, d));
 });
 
-test('research: 하위 에이전트(web-fetch)는 거부하고, 거부 문구에 코디네이터가 아니라 조사 역할이 적힌다(run-18 h16)', () => {
-  const r = rop('Agent', { subagent_type: 'web-fetch', prompt: 'x' });
+test('research: 웹 읽기(WebFetch·WebSearch, web-fetch 하위 에이전트)는 허용한다(소유자 결정, run-18 #42·#43)', () => {
+  ok(rop('WebFetch', { url: 'https://example.com', prompt: 'x' }));
+  ok(rop('WebSearch', { query: 'x' }));
+  ok(rop('Agent', { subagent_type: 'web-fetch', prompt: 'x' }));
+  ok(rop('Task', { subagent_type: 'web-fetch', prompt: 'x' }));
+  // web-fetch 하위 에이전트 안에서는 웹 읽기 도구만 쓴다.
+  const sub = (tool, input) => decide({ ...op(tool, input), agent_type: 'web-fetch' }, rcfg, rdeps());
+  ok(sub('WebFetch', { url: 'https://example.com', prompt: 'x' }));
+  ok(sub('WebSearch', { query: 'x' }));
+  for (const [t, i] of [['Bash', { command: 'ls' }], ['Write', { file_path: `${run}/x` }], ['Read', { file_path: 'a' }], ['Agent', { subagent_type: 'web-fetch', prompt: 'x' }]]) {
+    assert.equal(sub(t, i).allow, false, t);
+  }
+  // 다른 하위 에이전트는 여전히 막고, 거부 문구에 coordinator가 찍히지 않는다(run-18 h16).
+  const r = rop('Agent', { subagent_type: 'general-purpose', prompt: 'x' });
   assert.equal(r.allow, false);
   assert.doesNotMatch(r.reason, /coordinator/);
+  // 반영 모드에는 웹 읽기를 주지 않는다.
+  denies(decide({ ...op('WebFetch', { url: 'https://example.com' }), agent_type: 'web-fetch' }, fcfg, rdeps()), /agent_type\(web-fetch\)/);
 });
