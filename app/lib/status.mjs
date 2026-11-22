@@ -72,8 +72,9 @@ function readWorkers(file) {
       w.done = true;
       w.status = typeof e.status === 'string' ? e.status : null;
       w.attempts = Number.isSafeInteger(e.attempts) ? e.attempts : null;
-      const m = typeof e.actualModel === 'string' ? e.actualModel : typeof e.model === 'string' ? e.model : null;
-      if (m) w.model = m;
+      // 상자에는 짧은 이름(claude·gemini·muse)을 쓴다. 실제 모델 전체 이름은 따로 둔다(run-18 h25: 긴 이름에 잘려 "N회"가 사라졌다).
+      if (typeof e.model === 'string') w.model = e.model;
+      if (typeof e.actualModel === 'string') w.actualModel = e.actualModel;
     }
     byIssue.set(e.issue, w);
   }

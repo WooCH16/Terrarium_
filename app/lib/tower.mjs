@@ -60,7 +60,8 @@ function teamCard(slot, all, issues, legacy) {
   else if (shown.orphaned) now = '끝난 기록 없이 프로세스가 없음(중간에 끊김). stop-operator로 정리하세요';
   else if (workless(shown)) now = `작업 없이 호출됨 · ${worklessReason(shown)}`;
   else now = `${hhmm(shown.endedAt)} · 끝남`;
-  return { id: slot, state, workers, log: [...head, total, cut(recent, 70), cut(now, 70)] };
+  // 화면은 마지막 세 줄만 그린다(js/app.js). 호출된 카드는 누적·최근·지금 세 줄만 둔다(run-18 h25: 옛 하달 줄 때문에 누적 줄이 잘렸다).
+  return { id: slot, state, workers, log: [total, cut(recent, 70), cut(now, 70)] };
 }
 
 // status = readStatus() 결과(없으면 null). error = 읽기 실패 메시지.
@@ -71,6 +72,10 @@ export function towerView(status, error = null) {
   }
   const legacy = status.handoffs.filter((h) => !h.team).length;
   const operators = SLOTS.map((slot) => teamCard(slot, status.handoffs, status.issues, legacy));
-  if (status.issuesError) for (const o of operators) o.log.push(`이슈를 못 읽음: ${cut(status.issuesError, 50)}`);
+  // 이슈를 못 읽으면 세 줄을 넘기지 않게, 줄이 남으면 한 줄 더하고 아니면 마지막 줄 끝에 붙인다.
+  if (status.issuesError) for (const o of operators) {
+    if (o.log.length < 3) o.log.push(`이슈를 못 읽음: ${cut(status.issuesError, 50)}`);
+    else o.log[2] = `${o.log[2]} · 이슈를 못 읽음`;
+  }
   return { operators, note: null };
 }

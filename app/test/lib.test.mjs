@@ -295,3 +295,22 @@ test('하달: 끝난 시각이 없어도 적힌 프로세스가 다 죽었으면
   const few = towerView(await readStatus(run, () => { throw new Error('gh 로그인 필요'); }, { alive: () => false }));
   assert.match(few.operators[0].log.at(-1), /이슈를 못 읽음/);
 });
+
+test('관제탑(run-18 h25 모양): 옛 하달이 있고 실제 모델 이름이 길어도 워커 상자는 "#48 claude 1회", 기록은 세 줄을 넘지 않는다', async () => {
+  const run = towerRun();
+  for (let n = 1; n <= 3; n++) handoff(run, n, { legacy: true, session: ended([n]) });
+  handoff(run, 4, { team: 'tester', session: ended([48]), dispatch: { live: [48], base: 'h3' }, workers: [
+    { event: 'start', issue: 48, requestedModel: 'claude', model: 'claude', base: 'h3/issue-47' },
+    { event: 'end', issue: 48, attempts: 1, model: 'claude', status: '완료', actualModel: 'anthropic/claude-haiku-5-5' },
+  ] });
+  const v = towerView(await readStatus(run, noGh));
+  const t = v.operators[2];
+  assert.deepEqual(t.workers.map((w) => w.name), ['#48 claude 1회']);
+  assert.equal(t.log.length, 3);
+  assert.equal(t.log[0], '누적 · 호출 1회 · 작업 없이 0회 · 워커 1명', '누적 줄이 잘리지 않는다');
+  assert.deepEqual(v.operators[0].log, ['팀 없는 옛 하달 3개는 설정 창 진행 기록에', '아직 호출된 적 없음']);
+  const bad = towerView(await readStatus(run, () => { throw new Error('gh 로그인 필요'); }));
+  assert.ok(bad.operators.every((o) => o.log.length <= 3), '이슈를 못 읽어도 세 줄 이하');
+  assert.equal(bad.operators[2].log[0], t.log[0]);
+  assert.match(bad.operators[2].log[2], /이슈를 못 읽음$/);
+});
