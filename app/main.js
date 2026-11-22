@@ -11,7 +11,7 @@ import { CoordinatorTerminal, coordinatorEnv } from './lib/terminal.mjs';
 import { KeyStore, KEY_NAMES, KEY_LABELS } from './lib/keys.mjs';
 import { readStatus } from './lib/status.mjs';
 import { towerView } from './lib/tower.mjs';
-import { install } from './lib/install.mjs';
+import { install, checkInstallInput, originRepo } from './lib/install.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fwd = (p) => String(p).replace(/\\/g, '/');
@@ -140,11 +140,19 @@ ipcMain.handle('project:pick', async () => {
 });
 // 렌더러 입력에서는 세 값만 받는다(harnessDir·runsDir를 덮어쓰지 못하게, fable 조언 2).
 // 지정 저장소가 없으면 만들지 여기서 묻는다(결정 8-28). 동의는 이 창의 단추로만 받는다(렌더러 입력으로는 만들기를 켤 수 없다). 기본 선택은 만들지 않음.
+// 대상 프로젝트의 origin이 GitHub 저장소면 하네스 워크플로(결정 8-32)를 PR 하나로 넣을지 여기서 묻는다. 동의도 이 창의 단추로만 받는다. 기본 선택은 넣지 않음.
+// 넣지 않아도 설치는 되고, 하네스는 로컬 흐름(run-reflect)으로 돈다.
 ipcMain.handle('install', async (e, input = {}) => {
-  const base = { harnessDir, runsDir: runsDir(), exec, repo: input.repo, runName: input.runName, project: input.project };
+  const parent = BrowserWindow.fromWebContents(e.sender) ?? win;
+  const targetRepo = checkInstallInput({ repo: input.repo, runName: input.runName, project: input.project }) ? null : await originRepo(input.project, exec);
+  let addWorkflows = false;
+  if (targetRepo) {
+    const w = await dialog.showMessageBox(parent, { type: 'question', buttons: ['워크플로 PR 만들기', '넣지 않기'], defaultId: 1, cancelId: 1, message: `대상 저장소 ${targetRepo}에 하네스 워크플로를 넣을까요?`, detail: `이슈 PR, 하달 PR, 머지 트레인, 기본 CI 워크플로를 브랜치 하나와 PR 하나로 올립니다. main에는 쓰지 않고, 머지는 직접 합니다. 넣지 않으면 하네스는 로컬 흐름으로 돌고 끝 보고에 "CI 없음"을 적습니다.` });
+    addWorkflows = w.response === 0;
+  }
+  const base = { harnessDir, runsDir: runsDir(), exec, repo: input.repo, runName: input.runName, project: input.project, targetRepo, addWorkflows };
   const first = await install(base);
   if (!first.missing) return first;
-  const parent = BrowserWindow.fromWebContents(e.sender) ?? win;
   const c = await dialog.showMessageBox(parent, { type: 'question', buttons: ['비공개로 만들기', '취소'], defaultId: 1, cancelId: 1, message: `지정 저장소 ${input.repo}가 없습니다. 만들까요?`, detail: `gh repo create ${input.repo} --private 로 이 GitHub 계정에 비공개 저장소를 만든 뒤 설치를 이어 갑니다. 이슈, 제안문, 판정, 보고서, 기록 문서가 여기에 쌓입니다.` });
   if (c.response !== 0) return { ok: false, error: `${first.error} 만들지 않았습니다. 저장소를 직접 만들거나 이름을 고친 뒤 다시 설치하세요.` };
   return install({ ...base, createRepo: true });

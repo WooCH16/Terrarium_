@@ -275,7 +275,7 @@ export async function main(argv, env = process.env, deps = {}) {
     for (const n of issues) await stateOf(n);
     const waitsOn = new Set();
     if (fresh && gh.fetchDependsOn && gh.fetchIssueData) {
-      const onMain = deps.provenOnMain ?? (() => provenIssuesOnMain(git, { memo }));
+      const onMain = deps.provenOnMain ?? (() => provenIssuesOnMain(git, { memo, run }));
       const isAncestor = (a, b) => { try { git(memo, ['merge-base', '--is-ancestor', a, b]); return true; } catch { return false; } };
       let proven = null;
       const pending = new Map();

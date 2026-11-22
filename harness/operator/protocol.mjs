@@ -22,6 +22,11 @@ export const REVIEWER_MODEL = '리뷰어 모델';
 // 코디네이터 대조 결과 댓글
 export const CHECK_HEAD = '## 코디네이터 대조 결과';
 
+// push-branch가 이슈에 남기는 CI 결과 댓글(결정 8-32). 결과 보고서·판정 댓글이 아니다
+export const CI_HEAD = '## CI 결과';
+// 머지 트레인 워크플로(harness-train.yml)가 실행 기록에 한 줄로 찍는 결과 표지. 뒤에 JSON 한 개가 온다
+export const TRAIN_RESULT_MARK = 'HARNESS_TRAIN_RESULT';
+
 // 이슈 본문·보고서의 `- 이름: 값` 줄
 export const WORKER_MODEL = '워커 모델';
 export const ACTUAL_WORKER_MODEL = '실제 워커 모델';

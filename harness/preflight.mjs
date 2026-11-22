@@ -1,6 +1,7 @@
 // 사전 점검(이슈 #21): 설치·실행 전에 필요한 것이 갖춰졌는지 한 번에 확인한다.
-// node harness/preflight.mjs [--repo <owner/name>] [--json]
+// node harness/preflight.mjs [--repo <owner/name>] [--target-repo <owner/name>] [--json]
 //   --repo: 지정 저장소가 비공개인지도 확인한다.
+//   --target-repo: 대상 저장소(코드)에 하네스 워크플로가 main에 있는지, Actions가 PR을 만들 수 있는지 본다(결정 8-32). 경고만 낸다(로컬 흐름으로 돈다).
 //   --json: 사람이 읽는 표 대신 JSON 한 개를 낸다(데스크톱 앱 계정 화면이 읽는다).
 // 종료 코드: 0 모두 통과, 1 필수 항목 실패(쓸 수 있는 워커 모델이 없음, Jev 키 없음 포함), 2 사용법 오류.
 // 계정 로그인 여부는 CLI마다 확인 방법이 달라 여기서는 실행 가능 여부만 본다(gh는 로그인까지 본다).
@@ -62,6 +63,37 @@ export function runPreflight(opts = {}, deps = {}) {
     }
     // 결정 8-28: 저장소가 없을 때만 setup --create-repo가 만들어 준다. 공개 저장소는 고쳐 주지 않는다.
     add({ id: 'repo', label: `지정 저장소 ${opts.repo} 비공개`, ok, detail, fix: `비공개 저장소를 지정하세요. 저장소가 없으면 gh repo create ${opts.repo} --private로 만들거나, setup.mjs에 --create-repo를 붙이면 비공개로 만들어 줍니다. 이미 공개인 저장소는 만들어 주지 않으니 다른 비공개 저장소를 지정하세요` });
+  }
+
+  // 결정 8-32: 대상 저장소(코드)의 GitHub Actions 흐름. 실패가 아니라 경고다(없으면 로컬 흐름으로 돈다). required: false.
+  // opts.targetRepo가 없으면 "대상 원격 없음" 경고 하나만 낸다.
+  const warn = (c) => add({ required: false, ...c });
+  const LOCAL = '없어도 하네스는 로컬 흐름(run-reflect)으로 돌고 끝 보고에 "CI 없음"을 적습니다';
+  if (!opts.targetRepo) {
+    warn({ id: 'target-remote', label: '대상 저장소(PR·CI는 GitHub Actions)', ok: false, detail: '지정하지 않음', fix: `setup.mjs --target-repo <owner/name>으로 대상 저장소를 주고 --add-workflows로 워크플로를 PR 하나로 넣으세요. ${LOCAL}` });
+  } else if (!ghAuth) {
+    warn({ id: 'target-remote', label: `대상 저장소 ${opts.targetRepo}`, ok: false, detail: 'gh 로그인이 필요해 확인하지 못함', fix: `gh auth login 뒤 다시 점검하세요. ${LOCAL}` });
+  } else {
+    const t = opts.targetRepo;
+    const view = tryRun(gh, ['repo', 'view', t, '--json', 'visibility', '-q', '.visibility']);
+    const reach = view.status === 0;
+    warn({ id: 'target-remote', label: `대상 저장소 ${t}`, ok: reach, detail: reach ? `있음(${view.stdout.trim()}). 공개 저장소면 PR 본문에는 링크만 답니다` : (firstLine(view.stderr) || '읽지 못함'), fix: `저장소 이름과 gh 권한을 확인하세요. ${LOCAL}` });
+    if (reach) {
+      const files = ['harness-issue-pr.yml', 'harness-handoff-pr.yml', 'harness-train.yml'];
+      const missing = files.filter((f) => tryRun(gh, ['api', `repos/${t}/contents/.github/workflows/${f}?ref=main`, '--jq', '.path']).status !== 0);
+      warn({ id: 'target-workflows', label: '워크플로 틀이 대상 저장소 main에 있음', ok: missing.length === 0, detail: missing.length === 0 ? '셋 다 있음' : `없음: ${missing.join(', ')}`, fix: `setup.mjs --refresh --add-workflows로 PR 하나를 만들고 직접 머지하세요. ${LOCAL}` });
+      // 확인 필요: GET repos/{owner}/{repo}/actions/permissions/workflow의 필드 이름(default_workflow_permissions: read|write,
+      // can_approve_pull_request_reviews: "Allow GitHub Actions to create and approve pull requests" 설정)은 GitHub REST 문서로 다시 확인한다(S12 전).
+      const p = tryRun(gh, ['api', `repos/${t}/actions/permissions/workflow`]);
+      let perm = null;
+      try { perm = p.status === 0 ? JSON.parse(p.stdout) : null; } catch { perm = null; }
+      const canPr = perm?.can_approve_pull_request_reviews === true;
+      warn({
+        id: 'target-actions', label: 'Actions가 PR을 만들 수 있음', ok: canPr,
+        detail: perm ? `can_approve_pull_request_reviews=${String(perm.can_approve_pull_request_reviews)}, default_workflow_permissions=${String(perm.default_workflow_permissions)}(워크플로가 contents·pull-requests write를 직접 적는다)` : (firstLine(p.stderr) || '설정을 읽지 못함(저장소 관리자 권한이 필요할 수 있음)'),
+        fix: `저장소 Settings → Actions → General → Workflow permissions에서 "Allow GitHub Actions to create and approve pull requests"를 켜세요. main 보호 규칙이 있으면 트레인의 main 빨리감기가 막힐 수 있습니다. ${LOCAL}`,
+      });
+    }
   }
 
   // 코디네이터·오퍼레이터 세션은 Claude Code다. 하네스는 셸 없이 띄우므로 HARNESS_CLAUDE_BIN을 쓴다면 .exe나 .js여야 한다(.cmd 불가).
@@ -129,7 +161,7 @@ export function runPreflight(opts = {}, deps = {}) {
 export function formatReport(res) {
   const out = [];
   for (const c of res.checks) {
-    out.push(`${c.ok ? '통과' : '실패'}  ${c.label}  — ${c.detail}`);
+    out.push(`${c.ok ? '통과' : c.required ? '실패' : '경고'}  ${c.label}  — ${c.detail}`);
     if (!c.ok && c.fix) out.push(`      할 일: ${c.fix}`);
   }
   out.push('', '모델(워커·리뷰어):');
@@ -140,15 +172,17 @@ export function formatReport(res) {
 
 if (process.argv[1] && fileURLToPath(import.meta.url).replace(/\\/g, '/') === process.argv[1].replace(/\\/g, '/')) {
   const argv = process.argv.slice(2);
-  const known = new Set(['--repo', '--json']);
-  const i = argv.indexOf('--repo');
-  const repo = i === -1 ? undefined : argv[i + 1];
-  const bad = argv.some((a, k) => a.startsWith('--') && !known.has(a)) || (i !== -1 && (!repo || repo.startsWith('--') || !/^[\w.-]+\/[\w.-]+$/.test(repo)));
+  const known = new Set(['--repo', '--target-repo', '--json']);
+  const valueOf = (name) => { const i = argv.indexOf(name); return i === -1 ? { given: false } : { given: true, v: argv[i + 1] }; };
+  const badValue = ({ given, v }) => given && (!v || v.startsWith('--') || !/^[\w.-]+\/[\w.-]+$/.test(v));
+  const r = valueOf('--repo');
+  const t = valueOf('--target-repo');
+  const bad = argv.some((a) => a.startsWith('--') && !known.has(a)) || badValue(r) || badValue(t);
   if (bad) {
-    console.error('usage: node harness/preflight.mjs [--repo <owner/name>] [--json]');
+    console.error('usage: node harness/preflight.mjs [--repo <owner/name>] [--target-repo <owner/name>] [--json]');
     process.exit(2);
   }
-  const res = runPreflight({ repo });
+  const res = runPreflight({ repo: r.v, targetRepo: t.v });
   console.log(argv.includes('--json') ? JSON.stringify(res, null, 2) : formatReport(res));
   process.exit(res.ok ? 0 : 1);
 }

@@ -188,7 +188,7 @@ const isScript = (bin) => /\.(mjs|js)$/i.test(String(bin));
 const timedOut = (e) => e?.code === 'ETIMEDOUT' || e?.killed === true;
 
 // 모든 믿는 git 호출: sink 설정, 빈 hooksPath·attributesFile, fsmonitor 끔, GIT_NO_REPLACE_OBJECTS, 시간 제한, 출력 상한.
-function openGit(ctx) {
+export function openGit(ctx) {
   const env = gitEnv(ctx.env ?? process.env);
   const bin = ctx.gitBin ?? 'git';
   const defaultTimeout = ctx.gitTimeoutMs ?? DEFAULT_GIT_TIMEOUT_MS;
@@ -234,7 +234,7 @@ function verifyRepoConfig(git, ctx) {
 // 브랜치를 old에서 next로 앞으로만 옮긴다(update-ref compare-and-set).
 // 작업 트리는 하네스가 받은 경로(ctx.memo)의 체크아웃에서 그 브랜치가 열려 있을 때만 read-tree -m -u로 맞춘다. worktree 메타데이터(.git/worktrees/*)에서 읽은 경로로는 git을 절대 돌리지 않는다:
 // 다른 연결된 작업 폴더에 그 브랜치가 열려 있으면 ref를 옮기기 전에 거부한다.
-function advanceBranch(git, memo, branch, next, old, { allowPrimary }) {
+export function advanceBranch(git, memo, branch, next, old, { allowPrimary }) {
   if (!FULL_SHA.test(next)) throw new IntegrityError('옮길 커밋 해시가 40자리가 아닙니다.');
   const ref = `refs/heads/${branch}`;
   const current = tryGit(git, memo, ['rev-parse', '--verify', '--quiet', ref]) || null;
@@ -729,7 +729,7 @@ export function parseArgs(argv) {
 }
 
 // 이 하달의 이슈 브랜치: 이슈 번호(오름차순)와 끝 해시.
-function discoverTips(git, memo, handoff) {
+export function discoverTips(git, memo, handoff) {
   const out = git(memo, ['for-each-ref', '--format=%(refname:lstrip=2) %(objectname)', `refs/heads/${handoff}/`]);
   const re = new RegExp(`^${handoff}/issue-([1-9]\\d{0,8}) ([0-9a-f]{40})$`);
   return out.split('\n').map((s) => re.exec(s.trim())).filter(Boolean).map((m) => ({ n: Number(m[1]), sha: m[2] })).sort((a, b) => a.n - b.n);
@@ -904,7 +904,33 @@ async function runEnqueue({ run, config, cfg, handoff, env, deps }) {
 }
 
 // main의 첫 부모 사슬에서 이 하네스가 만든 병합 커밋(부모 둘, 첫 줄 `병합: 이슈 #<N>`, `허용된 커밋: <40자리>` 줄)의 이슈 번호들.
+// ctx.run이 있으면 머지 트레인(결정 8-32)이 반영한 이슈도 더한다: run-train이 handoffs/h<N>/train.json에 남긴 허용된 해시가 main의 조상일 때만.
+// 트레인은 GitHub Actions가 하달 단위로 합치므로 이슈마다의 병합 커밋이 main의 첫 부모 사슬에 없다. train.json은 handoffs/ 아래라 에이전트가 쓰지 못한다.
 export function provenIssuesOnMain(git, ctx) {
+  const proven = provenByMergeCommits(git, ctx);
+  if (typeof ctx.run === 'string') for (const n of trainProvenIssues(git, ctx.memo, ctx.run)) proven.add(n);
+  return proven;
+}
+
+export const trainRecordFile = (run, handoff) => `${run}/handoffs/${handoff}/train.json`;
+
+// train.json: { train, runUrl, at, issues: [{ issue, sha }] }. 모양이 틀리거나 해시가 main에 없으면 세지 않는다.
+export function trainProvenIssues(git, memo, run) {
+  const out = new Set();
+  let names = [];
+  try { names = readdirSync(`${run}/handoffs`).filter((n) => HANDOFF.test(n)); } catch { return out; }
+  for (const h of names) {
+    let d;
+    try { d = JSON.parse(readFileSync(trainRecordFile(run, h), 'utf8')); } catch { continue; }
+    for (const it of Array.isArray(d?.issues) ? d.issues : []) {
+      if (!Number.isSafeInteger(it?.issue) || it.issue <= 0 || !FULL_SHA.test(it?.sha ?? '')) continue;
+      if (isAnc(git, memo, it.sha, 'refs/heads/main')) out.add(it.issue);
+    }
+  }
+  return out;
+}
+
+function provenByMergeCommits(git, ctx) {
   const out = git(ctx.memo, ['log', '--first-parent', '--format=%H%x00%P%x00%B', '-z', 'refs/heads/main']);
   const tokens = out.split('\0');
   const proven = new Set();
@@ -927,7 +953,9 @@ export function provenIssuesOnMain(git, ctx) {
 //   (나) workers.jsonl의 시작 기록에서 다른 하달의 브랜치에서 시작한 워커의 시작 커밋이 main에 없고 그 이슈 브랜치가 아직 품고 있으면 거부
 //       (base 하달이 중단·정리돼 브랜치가 사라진 경우).
 // 함께 반영하는 길은 두지 않는다. 문제가 없으면 null.
-export function baseOrderProblem(git, memo, run, handoff, tips) {
+// opts.ahead: 같은 트레인에서 이 하달보다 앞에 쌓이는 하달들(run-train, 결정 8-32). 그 하달의 결과는 main에 먼저 들어가는 것으로 본다.
+export function baseOrderProblem(git, memo, run, handoff, tips, opts = {}) {
+  const ahead = opts.ahead instanceof Set ? opts.ahead : new Set();
   const onMain = (sha) => isAnc(git, memo, sha, 'refs/heads/main');
   const embeds = (sha) => tips.some((t) => isAnc(git, memo, sha, t.sha));
   let base = null;
@@ -936,7 +964,7 @@ export function baseOrderProblem(git, memo, run, handoff, tips) {
     if (typeof d?.base === 'string' && HANDOFF.test(d.base) && d.base !== handoff) base = d.base;
   } catch { /* 기록이 없으면 (나)만 본다 */ }
   const refuse = (h, n) => `${handoff}은 ${h}의 결과${n ? `(#${n})` : ''} 위에서 시작했고 그 결과가 아직 main에 없습니다. ${h}부터 반영하세요. 아무것도 합치지 않았습니다.`;
-  if (base) {
+  if (base && !ahead.has(base)) {
     for (const t of discoverTips(git, memo, base)) if (!onMain(t.sha) && embeds(t.sha)) return refuse(base, t.n);
   }
   let lines = [];
@@ -945,7 +973,7 @@ export function baseOrderProblem(git, memo, run, handoff, tips) {
     let e;
     try { e = JSON.parse(line); } catch { continue; }
     const m = /^(h[1-9]\d{0,8})\/issue-[1-9]\d{0,8}$/.exec(e?.base ?? '');
-    if (e?.event !== 'start' || !m || m[1] === handoff || !FULL_SHA.test(e.baseCommit ?? '')) continue;
+    if (e?.event !== 'start' || !m || m[1] === handoff || ahead.has(m[1]) || !FULL_SHA.test(e.baseCommit ?? '')) continue;
     if (!onMain(e.baseCommit) && embeds(e.baseCommit)) return refuse(m[1], null);
   }
   return null;

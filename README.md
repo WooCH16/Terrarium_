@@ -12,7 +12,7 @@ Terrarium은 Claude Code 에이전트를 계층으로 나눠 일을 맡기는 �
 | 워커 | 실제 작업을 합니다. 작업마다 워크트리 하나를 씁니다 | Pi(claude·gemini·muse) |
 | 리뷰어 | 제안문과 보고서를 허용/거부합니다. 이슈마다 워커 모델·유형·난이도도 고릅니다(라우팅) | Jev(TypeSafe System One API). 판단은 Jev, 결정은 스크립트 |
 
-결과는 오퍼레이터 보고서 → 리뷰어 허용/거부 → 코디네이터 완료 기준 대조 → 사용자 보고 순서로 올라옵니다. 사용자가 반영을 결정해야만 대상 프로젝트의 `main`이 바뀝니다. 자세한 정의는 [docs/00-definition.md](docs/00-definition.md)를 봅니다.
+결과는 오퍼레이터 보고서 → 리뷰어 허용/거부 → 코디네이터 완료 기준 대조 → 사용자 보고 순서로 올라옵니다. 사용자가 반영을 결정해야만 대상 프로젝트의 `main`이 바뀝니다. 대상 프로젝트에 GitHub 원격과 하네스 워크플로가 있으면 이슈 PR·하달 PR·CI·머지 트레인은 그 저장소의 GitHub Actions가 하고(하네스는 브랜치를 올리고 결과를 읽기만, 트레인은 승인 뒤에만), 원격이 없으면 지금처럼 로컬 흐름(`run-reflect`)으로 돕니다(결정 8-32, [docs/adr/workflow.md](docs/adr/workflow.md)). 자세한 정의는 [docs/00-definition.md](docs/00-definition.md)를 봅니다.
 
 ## 범위 (v0)
 

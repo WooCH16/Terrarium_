@@ -7,7 +7,7 @@ import { coordinatorArgs, coordinatorEnv, CoordinatorTerminal, TOOLS } from '../
 import { KeyStore } from '../lib/keys.mjs';
 import { readStatus } from '../lib/status.mjs';
 import { towerView, SLOTS } from '../lib/tower.mjs';
-import { install, checkInstallInput } from '../lib/install.mjs';
+import { install, checkInstallInput, githubRepoFromUrl, originRepo } from '../lib/install.mjs';
 
 const fwd = (p) => p.split(String.fromCharCode(92)).join('/');
 const made = [];
@@ -313,4 +313,25 @@ test('관제탑(run-18 h25 모양): 옛 하달이 있고 실제 모델 이름이
   assert.ok(bad.operators.every((o) => o.log.length <= 3), '이슈를 못 읽어도 세 줄 이하');
   assert.equal(bad.operators[2].log[0], t.log[0]);
   assert.match(bad.operators[2].log[2], /이슈를 못 읽음$/);
+});
+
+test('설치(결정 8-32): 대상 프로젝트 origin이 GitHub면 대상 저장소로 넘기고, 동의했을 때만 --add-workflows(아니면 --no-workflows)', async () => {
+  assert.equal(githubRepoFromUrl('https://github.com/owner/app.git\n'), 'owner/app');
+  assert.equal(githubRepoFromUrl('git@github.com:owner/app.git'), 'owner/app');
+  assert.equal(githubRepoFromUrl('https://github.com/owner/app'), 'owner/app');
+  assert.equal(githubRepoFromUrl('https://gitlab.com/owner/app.git'), null);
+  assert.equal(githubRepoFromUrl('C:/src/app'), null);
+  assert.equal(await originRepo('C:/src/app', () => ({ status: 0, stdout: 'https://github.com/owner/app.git\n' })), 'owner/app');
+  assert.equal(await originRepo('C:/src/app', () => ({ status: 2, stdout: '' })), null);
+  assert.equal(await originRepo(undefined, () => { throw new Error('부르지 않는다'); }), null);
+  const calls = [];
+  const exec = (bin, args) => { calls.push([bin, ...args]); return bin === 'gh' ? { status: 0, stdout: 'PRIVATE\n' } : { status: 0, stdout: 'ok' }; };
+  const base = { harnessDir: 'C:/h', runsDir: 'C:/d/runs', repo: 'o/r', runName: 'p1', project: 'C:/src/app', exec };
+  assert.equal((await install({ ...base, targetRepo: 'owner/app' })).ok, true);
+  assert.deepEqual(calls.at(-1).slice(-3), ['--target-repo', 'owner/app', '--no-workflows'], '기본은 넣지 않음');
+  assert.equal((await install({ ...base, targetRepo: 'owner/app', addWorkflows: true })).ok, true);
+  assert.deepEqual(calls.at(-1).slice(-3), ['--target-repo', 'owner/app', '--add-workflows']);
+  assert.equal((await install({ ...base, targetRepo: 'bad name' })).ok, false);
+  await install(base);
+  assert.ok(!calls.at(-1).includes('--target-repo'), '대상 저장소가 없으면 로컬 흐름');
 });

@@ -23,16 +23,31 @@ export async function repoVisibility(repo, exec) {
   return { ok: true, visibility: String(r.stdout).trim() };
 }
 
+// 대상 프로젝트의 GitHub 저장소(결정 8-32): origin 주소에서 owner/name을 읽는다. github.com 주소가 아니면 null(로컬 흐름).
+export function githubRepoFromUrl(url) {
+  const m = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9_.-]{1,100})\/([A-Za-z0-9_.-]{1,100}?)(?:\.git)?\/?$/.exec(String(url ?? '').trim());
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+export async function originRepo(project, exec) {
+  if (!project) return null;
+  const r = await exec('git', ['-C', project, 'remote', 'get-url', 'origin'], {});
+  return r.status === 0 ? githubRepoFromUrl(r.stdout) : null;
+}
+
 // 성공이면 { ok: true, run, output }, 아니면 { ok: false, error, missing? }.
 // createRepo: 사용자가 "없으면 만들까요?"에 동의했을 때만 true. 저장소가 없을 때 setup.mjs에 --create-repo를 넘긴다(결정 8-28).
-export async function install({ harnessDir, runsDir, repo, runName, project, createRepo = false, exec }) {
+// targetRepo·addWorkflows(결정 8-32): 대상 저장소를 harness.json에 적고, 사용자가 "워크플로를 넣을까요?"에 동의했을 때만(true) --add-workflows,
+// 아니면 --no-workflows를 넘긴다(대상 저장소에 아무것도 쓰지 않는다).
+export async function install({ harnessDir, runsDir, repo, runName, project, createRepo = false, targetRepo = null, addWorkflows = false, exec }) {
   const bad = checkInstallInput({ repo, runName, project });
   if (bad) return { ok: false, error: bad };
   const v = await repoVisibility(repo, exec);
   if (!v.ok && !(v.missing && createRepo === true)) return v;
   if (v.ok && v.visibility !== 'PRIVATE') return { ok: false, error: `지정 저장소 ${repo}가 비공개가 아닙니다(${v.visibility}). 하네스는 비공개 저장소에만 씁니다. 저장소를 비공개로 바꾸거나 다른 저장소를 고르세요.` };
   const run = `${runsDir.replace(/\\/g, '/')}/${runName}`;
-  const args = [`${harnessDir}/setup.mjs`, '--run', run, '--repo', repo, ...(project ? ['--project', project] : []), ...(v.missing ? ['--create-repo'] : [])];
+  if (targetRepo !== null && !REPO.test(targetRepo)) return { ok: false, error: '대상 저장소는 <소유자>/<이름> 모양이어야 합니다.' };
+  const target = targetRepo ? ['--target-repo', targetRepo, addWorkflows === true ? '--add-workflows' : '--no-workflows'] : [];
+  const args = [`${harnessDir}/setup.mjs`, '--run', run, '--repo', repo, ...(project ? ['--project', project] : []), ...(v.missing ? ['--create-repo'] : []), ...target];
   const r = await exec('node', args, { timeout: 300000 });
   const output = `${r.stdout ?? ''}${r.stderr ?? ''}`.trim();
   if (r.status !== 0) return { ok: false, error: `setup.mjs가 실패했습니다(종료 코드 ${r.status}).`, output };

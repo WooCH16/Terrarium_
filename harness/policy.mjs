@@ -118,6 +118,11 @@ function bashTouchesProtected(command, cwd, config) {
   return false;
 }
 
+// 대상 저장소 원격에 올릴 수 있는 브랜치 모양(결정 8-32). main, train/*, 그 밖의 브랜치는 이 모양에 들지 않는다.
+export const PUSH_BRANCH = /^(h[1-9]\d{0,8}\/issue-[1-9]\d{0,8}|integration\/h[1-9]\d{0,8})$/;
+// 트레인에 넣는 하달 목록: 쉼표로 이은 h<N>, 10개까지.
+export const TRAIN_HANDOFFS = /^h[1-9]\d{0,8}(,h[1-9]\d{0,8}){0,9}$/;
+
 // 오퍼레이터 시작·중지 스크립트: 스크립트별로 허용 플래그와 값 모양을 고정한다(플래그는 한 번씩만).
 const OPERATOR_SCRIPTS = {
   // --base h<N>: 반영 전인 하달 h<N>의 결과 위에서 시작한다(결정 8-31). 스크립트가 --handoff와 함께 쓰는 것을 거부한다.
@@ -131,6 +136,11 @@ const OPERATOR_SCRIPTS = {
   'wait-operator.mjs': { '--wait': /^[0-9a-f]{12}$/, required: ['--wait'] },
   // 이슈 #44: Jev 라우팅(워커 모델·유형). 초안 이름만 받고 스크립트가 지정 저장소 클론의 .drafts/ 안에서 찾는다.
   'route-issue.mjs': { '--draft': /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/, required: ['--draft'] },
+  // 결정 8-32: 대상 저장소 원격에 올리는 브랜치는 두 모양뿐이다(이슈 브랜치, 통합 브랜치). push-branch.mjs도 같은 정규식으로 다시 본다.
+  // 허용 판정을 받은 뒤에만 올리는 검사는 스크립트가 한다(판정 댓글의 해시와 브랜치 끝이 같아야 한다).
+  'push-branch.mjs': { '--branch': PUSH_BRANCH, required: ['--branch'] },
+  // 결정 8-32: 머지 트레인 시작. run-reflect와 같은 자리다: "사용자가 승인한 뒤에만"은 훅이 아니라 코디네이터 규칙이 지킨다.
+  'run-train.mjs': { '--handoffs': TRAIN_HANDOFFS, required: ['--handoffs'] },
 };
 
 function operatorScriptArgsOk(script, rest) {
@@ -299,7 +309,14 @@ function coordinatorBash(command, config, deps) {
     }
     return allow();
   }
-  return deny('코디네이터는 지정 저장소의 gh issue·gh repo view·git -C <지정 저장소 클론> 명령과 오퍼레이터 시작·중지 스크립트(node <하네스>/operator/run-operator·run-research·run-reflect·stop-operator.mjs, 정해진 플래그 모양만)만 실행한다. 대상 프로젝트 실행은 오퍼레이터에게 맡겨라');
+  // 결정 8-32: PR·CI·머지는 대상 저장소의 GitHub Actions가 한다. 하네스 쪽 쓰기는 두 스크립트로만 한다.
+  if (bin === 'gh' && (a1 === 'pr' || a1 === 'workflow' || a1 === 'run' || a1 === 'api')) {
+    return deny(`gh ${a1}은 직접 쓰지 않는다. 브랜치 올리기와 PR·CI 결과 읽기는 node <하네스>/operator/push-branch.mjs --branch <h<N>/issue-<번호>|integration/h<N>>, 트레인 시작은 사용자 승인 뒤 node <하네스>/operator/run-train.mjs --handoffs h<N>[,h<M>...]로 한다(결정 8-32)`);
+  }
+  if (bin === 'git' && tokens.includes('push')) {
+    return deny('대상 저장소에 직접 git push 하지 않는다. 이슈 브랜치·통합 브랜치는 node <하네스>/operator/push-branch.mjs --branch <이름>으로만 올린다(결정 8-32). main은 GitHub Actions만 쓴다');
+  }
+  return deny('코디네이터는 지정 저장소의 gh issue·gh repo view·git -C <지정 저장소 클론> 명령과 오퍼레이터 시작·중지 스크립트(node <하네스>/operator/run-operator·run-research·run-reflect·run-train·push-branch·stop-operator.mjs, 정해진 플래그 모양만)만 실행한다. 대상 프로젝트 실행은 오퍼레이터에게 맡겨라');
 }
 
 // 코디네이터가 읽거나 검색하면 안 되는 비밀값 파일 이름 (예시·견본 파일은 허용)

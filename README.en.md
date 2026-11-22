@@ -12,7 +12,7 @@ Terrarium is a personal harness that splits work across layered Claude Code agen
 | Worker | Does the actual change, one git worktree per task | Pi (claude, gemini, or muse models) |
 | Reviewer | Allows or rejects proposals and result reports. Also routes each issue to a worker model, type, and difficulty | Jev (TypeSafe System One API). Jev judges; the scripts decide |
 
-Results flow upward: operator report → reviewer verdict → coordinator check against the criteria → report to you. The target project's `main` changes only after you decide to apply the results. See [docs/00-definition.md](docs/00-definition.md) (Korean) for the full definition.
+Results flow upward: operator report → reviewer verdict → coordinator check against the criteria → report to you. The target project's `main` changes only after you decide to apply the results. If the target project has a GitHub remote and the harness workflows, its GitHub Actions run the issue PRs, handoff PRs, CI, and the merge train (the harness only pushes branches and reads the results, and starts the train only after you approve); without a remote the harness keeps the local flow (`run-reflect`) (decision 8-32, [docs/adr/workflow.md](docs/adr/workflow.md), Korean). See [docs/00-definition.md](docs/00-definition.md) (Korean) for the full definition.
 
 ## Scope (v0)
 

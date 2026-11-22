@@ -1,0 +1,37 @@
+# Terrarium 하네스 기본 CI (결정 8-32). 대상 저장소에 자기 CI가 없을 때만 쓴다.
+# 다른 세 워크플로가 workflow_call로 부른다. GITHUB_TOKEN으로 연 PR의 pull_request 실행은 승인이 있어야 돌기 때문에
+# PR 이벤트에 기대지 않고, push를 받은 같은 실행 안에서 이 CI를 부른다.
+# 시험 명령: 저장소 변수 HARNESS_TEST_COMMAND, 없으면 설치 때 고른 명령(setup --test-command, 기본 npm test).
+# 대상 저장소에 자기 CI가 있으면 setup --ci-workflow <파일>로 세 워크플로의 uses: 줄을 그 파일로 바꾼다(그 파일도 workflow_call과 ref 입력이 있어야 한다).
+name: harness-ci
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 시험할 커밋(40자리 해시)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 의존성 설치
+        run: |
+          if [ -f package-lock.json ]; then npm ci; fi
+      - name: 시험
+        env:
+          HARNESS_TEST_COMMAND: ${{ vars.HARNESS_TEST_COMMAND || 'npm test' }}
+        run: bash -c "$HARNESS_TEST_COMMAND"

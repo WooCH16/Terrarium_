@@ -141,3 +141,25 @@ test('#26: secretEnv가 있는 모델은 비밀값이 없으면 쓸 수 없고, 
   assert.ok(seenEnv.some((e) => e?.GEMINI_API_KEY === 'g-secret'));
   assert.ok(!JSON.stringify(res).includes('g-secret'));
 });
+
+// 결정 8-32: 대상 저장소의 Actions 흐름은 실패가 아니라 경고다(로컬 흐름으로 돈다).
+test('대상 저장소: 없으면 경고 하나, 있으면 워크플로·Actions PR 권한을 읽어 안내(점검 결과는 통과 그대로)', () => {
+  const none = runPreflight({}, deps());
+  assert.equal(none.ok, true);
+  assert.equal(byId(none, 'target-remote').ok, false);
+  assert.equal(byId(none, 'target-remote').required, false);
+  assert.match(formatReport(none), /경고  대상 저장소/);
+  assert.match(byId(none, 'target-remote').fix, /로컬 흐름\(run-reflect\)/);
+  const perm = (o) => ({ 'gh api repos/owner/app/actions/permissions/workflow': { status: 0, stdout: JSON.stringify(o), stderr: '' } });
+  const good = runPreflight({ targetRepo: 'owner/app' }, deps({ out: { 'gh repo view owner/app --json visibility -q .visibility': { status: 0, stdout: 'PUBLIC\n', stderr: '' }, ...perm({ default_workflow_permissions: 'read', can_approve_pull_request_reviews: true }) } }));
+  assert.equal(good.ok, true);
+  for (const id of ['target-remote', 'target-workflows', 'target-actions']) assert.equal(byId(good, id).ok, true, id);
+  assert.match(byId(good, 'target-remote').detail, /링크만/);
+  const d = deps({ out: { 'gh api repos/owner/app/contents/.github/workflows/harness-train.yml?ref=main --jq .path': { status: 1, stdout: '', stderr: 'Not Found' }, ...perm({ default_workflow_permissions: 'read', can_approve_pull_request_reviews: false }) } });
+  const bad = runPreflight({ targetRepo: 'owner/app' }, d);
+  assert.equal(bad.ok, true, '경고는 점검 실패가 아니다');
+  assert.match(byId(bad, 'target-workflows').detail, /harness-train\.yml/);
+  assert.equal(byId(bad, 'target-actions').ok, false);
+  assert.match(byId(bad, 'target-actions').fix, /Allow GitHub Actions to create and approve pull requests/);
+  assert.ok(d.calls.every((c) => !/^gh (pr|workflow|run) /.test(c)), '읽기만 한다');
+});

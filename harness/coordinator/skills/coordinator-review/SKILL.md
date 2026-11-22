@@ -16,7 +16,8 @@ description: 하달이 끝난 이슈의 결과 보고서를 리뷰어(Jev)에게
 4. 다시 시키는 횟수는 리뷰어 거부와 대조 미충족을 합쳐 **이슈당 2회**까지다. 넘으면 그 이슈의 상태 라벨을 `거부목록`으로 바꾸고(`gh issue edit <번호> --repo {{REPO}} --remove-label <지금 상태 라벨> --add-label 거부목록`) 막힌 이슈로 모은다(`coordinator-exceptions`). 상태 라벨은 이슈마다 하나만 둔다. 둘이면 다음 하달이 종료 코드 2로 멈춘다.
 5. 통과한 이슈에 대조 결과 댓글을 남기고 `gh issue close`로 닫는다. 댓글은 `{{ISSUES}}/.drafts/<이름>.md`에 절대 경로로 쓰고 `--body-file <그 절대 경로>`로 넘긴다. 첫 줄은 정확히 `## 코디네이터 대조 결과`다(검사가 이 줄로 찾는다).
 6. 기록 문서에 최종 보고를 적고 커밋·푸시한다(`coordinator-records`).
-7. 사용자 보고 양식(규칙: "사용자 보고 양식")으로 보고한다. `main` 반영은 사용자에게 묻고 기다린다.
+7. 허용·대조를 통과한 이슈는 `node {{HARNESS}}/operator/push-branch.mjs --branch h<N>/issue-<번호>`로 올리고, 하달의 이슈가 모두 통과하면 `--branch integration/h<N>`으로 하달 PR·CI를 읽는다(규칙: "작업 흐름 (결정 8-32)", `coordinator-issue-flow`). CI 실패(종료 코드 1)는 새 하달로 재작업한다(4번의 한도에 함께 센다). 종료 코드 4면 대상 원격이 없는 것이다: "CI 없음"으로 적고 넘어간다.
+8. 끝 보고(`coordinator-records`)로 보고한다. `main` 반영(트레인)은 끝 보고의 "결정할 것"에서 묻고 기다린다.
 
 ## 확인할 점
 

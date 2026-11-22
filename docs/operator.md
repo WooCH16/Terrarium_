@@ -162,6 +162,20 @@
 - 병합 방식(병합 커밋, 스쿼시 등)은 큐 설정에 달려 있고 **미확인**이다.
 - `main`을 쓸 수 있는 순간은 **사용자 결정 뒤 반영 모드 세션**뿐이다. 훅은 반영 모드에서 리뷰어 허용 기록이 있는 해시만 `main`에 쓰도록 판정한다.
 
+### 8.1 대상 원격이 있을 때: PR·CI·머지 트레인 (결정 8-32, `docs/adr/workflow.md`)
+
+위 반영 모드는 원격·워크플로가 없는 대상의 길이다(결정 4). 대상 저장소에 GitHub 원격과 하네스 워크플로(`harness/github/workflows/`, `setup --add-workflows`가 PR 하나로 넣는다)가 있으면 PR·CI·`main` 머지는 그 저장소의 GitHub Actions가 한다. 하네스 쪽 쓰기는 두 스크립트뿐이고, 훅은 이 둘을 **코디네이터에게만** 허용한다(오퍼레이터 세션은 리뷰어 판정 전에 끝나므로 올릴 자리가 없다).
+
+| 스크립트 | 하는 일 | 종료 코드 |
+|---|---|---|
+| `push-branch.mjs --branch <h<N>/issue-<번호> \| integration/h<N>>` | 허용 판정의 해시와 브랜치 끝이 같을 때만(통합 브랜치는 합쳐진 이슈가 모두 허용되고 그 밖은 병합 커밋뿐일 때만) `harness.json`의 `targetRemote`에 올린다. 강제 push 없음. 이슈 PR의 대상(`integration/h<N>`)이 원격에 없으면 그 시작점을 먼저 올린다. Actions가 연 PR과 CI를 기다려 읽는다(`gh pr list`·`checks`, 읽기만). CI 실패면 관련 이슈를 `미완료`로 두고 `## CI 결과: 실패` 댓글. 기록은 `handoffs/h<N>/ci.jsonl` | 0 통과, 1 CI 실패, 2 검사 실패(올리지 않음), 4 원격·워크플로 없음, 5 기다림 한도, 8 진행 중 |
+| `run-train.mjs --handoffs h<N>[,h<M>...]` | 사용자 승인 뒤. 반영 순서를 `baseOrderProblem`(앞에 쌓이는 하달은 먼저 들어가는 것으로 봄)으로 검사, 하달 PR이 열려 있는지 확인, `gh workflow run harness-train.yml` 하나로 시작, 끝날 때까지 기다려 결과 줄을 읽는다. 통과면 실행 폴더의 대상 프로젝트 `main`을 원격 `main`으로 빨리감기만 하고 `반영됨`과 `handoffs/h<N>/train.json`. 원격·워크플로가 없으면 `run-reflect`를 순서대로 | 0 통과, 1 트레인 실패(`main` 그대로), 2 순서·설정 실패(시작 안 함), 5 기다림 한도, 8 진행 중 |
+
+- Actions 워크플로: `harness-issue-pr.yml`(`h*/issue-*` push → `integration/h<N>`으로 이슈 PR, CI), `harness-handoff-pr.yml`(`integration/h*` push → `main`으로 하달 PR, CI), `harness-train.yml`(`workflow_dispatch`, 하달 목록 → `train/<날짜>-<순번>`에 쌓고 CI → 통과면 `main` 빨리감기·하달 PR 닫기, 실패면 맨 뒤부터 빼며 실패 하달을 찾아 요약, `main`은 그대로), `harness-ci.yml`(재사용, 시험 명령). 권한은 `contents: write`, `pull-requests: write`뿐(CI는 `contents: read`). PR 본문에는 지정 저장소 이슈 링크만 단다.
+- 훅: 모든 역할의 직접 `git push`, `gh pr`, `gh workflow`, `gh run`, `gh api`를 거부한다. `push-branch`의 브랜치 모양은 훅과 스크립트가 같은 정규식(`policy.mjs`의 `PUSH_BRANCH`)으로 본다. "사용자 승인 뒤에만 `run-train`"은 `run-reflect`처럼 코디네이터 규칙이 지킨다(훅은 승인을 모른다).
+- 사전 점검 `preflight.mjs --target-repo <owner/name>`은 대상 저장소, `main`의 워크플로, Actions의 PR 만들기 설정을 읽어 경고로 안내한다(실패가 아니다).
+- 남는 한계는 `docs/known-limitations.md` 10절.
+
 ## 9. 안전과 격리
 
 ### 9.1 막을 사고와 어겨 보는 시도
