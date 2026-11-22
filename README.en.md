@@ -118,6 +118,11 @@ node scripts/test.mjs          # everything (a few minutes)
 node scripts/check.js          # CI checks
 ```
 
+## Contributing and security
+
+- How to send issues and PRs: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Report security problems privately, not in public issues: [SECURITY.md](SECURITY.md)
+
 ## License
 
 [MIT](LICENSE).
