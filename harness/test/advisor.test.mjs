@@ -59,3 +59,19 @@ test('패널(결정 8-24): 코디네이터 정의·조언 스킬·어드바이�
   assert.match(coord, /조언 id는 넘기지 않는다/);
   assert.match(panel, /판정 명령을 실행하지 않는다/);
 });
+
+test('패널(결정 8-26): 교환 단계는 자기 초안을 추천하지 못하고, 세기 단계는 자기 추천 줄을 세지 않는다', () => {
+  const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), 'utf8');
+  // 단계 하나의 글만 떼어 본다: 번호 매긴 단계의 시작부터 다음 단계 번호 앞까지
+  const step = (doc, title) => { const i = doc.indexOf(`**${title}`); assert.ok(i >= 0, title); return doc.slice(i, doc.slice(i + 1).search(/\n\s*\d\. \*\*/) + i + 1); };
+  const exchange = step(read('../advisor/skills/advisor-panel/SKILL.md'), '교환');
+  assert.match(exchange, /자기 초안은 추천할 수 없다/);
+  assert.match(exchange, /다른 두 자리/);
+  assert.doesNotMatch(exchange, /자기 초안이어도 된다/);
+  const count = step(read('../coordinator/skills/coordinator-advice/SKILL.md'), '세기');
+  assert.match(count, /자기 자리를 추천한 줄은 세지 않는다/);
+  assert.match(count, /버린다/);
+  assert.match(count, /자리 a의 초안/);
+  assert.match(read('../coordinator/AGENT.md'), /자기 초안은 추천하지 못한다/);
+  assert.match(read('../../docs/checks/owner-decisions.md'), /^\| 8-26 \| 패널 자기 추천 금지 \|/m);
+});

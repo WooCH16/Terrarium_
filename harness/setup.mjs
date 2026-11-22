@@ -5,6 +5,7 @@
 //   --refresh: 규칙(CLAUDE.md)·에이전트·설정만 다시 쓴다. 클론, 대상 프로젝트, 로그, 기록은 건드리지 않는다
 //   --advisor-stub: advisor 자리에 어드바이저 대역(stubs/advisor-stub.md)을 설치한다(시험용)
 // 지정 저장소가 PRIVATE가 아니면(--no-clone, --refresh 제외) 아무것도 쓰지 않고 종료 코드 2로 끝난다.
+// --repo가 owner/name 형식이 아니거나, --refresh에서 기존 harness.json의 지정 저장소와 다르면 아무것도 쓰지 않고 종료 코드 1로 끝난다.
 // HARNESS_GH_BIN은 시험용이다(gh 대신 쓸 실행 파일 또는 .mjs 스크립트).
 import { mkdirSync, existsSync, readdirSync, readFileSync, writeFileSync, cpSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
@@ -38,8 +39,17 @@ const noClone = process.argv.includes('--no-clone');
 const refresh = process.argv.includes('--refresh'); // 역할 파일(CLAUDE.md, agents, settings)만 다시 쓴다
 const advisorStub = process.argv.includes('--advisor-stub');
 const projectArg = arg('--project');
-if (!runArg || !repo || (process.argv.includes('--project') && !projectArg)) {
-  console.error('usage: node setup.mjs --run <dir> --repo <owner/name> [--project <git 폴더>] [--no-clone | --refresh] [--advisor-stub]');
+const USAGE = 'usage: node setup.mjs --run <dir> --repo <owner/name> [--project <git 폴더>] [--no-clone | --refresh] [--advisor-stub]';
+if (!runArg || (process.argv.includes('--project') && !projectArg)) {
+  console.error(USAGE);
+  process.exit(1);
+}
+// 지정 저장소 이름은 owner/name 한 꼴만 받는다. `--repo undefined`가 harness.json을 덮은 일이 있었다(run-18).
+const REPO_FORMAT = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const validRepo = (v) => typeof v === 'string' && REPO_FORMAT.test(v) && !/\.git$/i.test(v);
+if (!validRepo(repo)) {
+  console.error(USAGE);
+  console.error(`--repo 값 ${repo === undefined ? '(없음)' : JSON.stringify(repo)}은 owner/name 형식이 아니다(영문자·숫자·-_. 만, 빗금 하나, 양쪽 비어 있지 않음, .git 끝 없음). 아무것도 쓰지 않고 멈춘다.`);
   process.exit(1);
 }
 const run = fwd(runArg);
@@ -53,6 +63,8 @@ const RESERVED = new Set(['issues', 'worktrees', 'logs', 'handoffs', 'reviewer-i
 let project = { name: 'memo', source: null };
 if (refresh && existsSync(`${run}/harness.json`)) {
   const old = JSON.parse(readFileSync(`${run}/harness.json`, 'utf8'));
+  // 다른 저장소로 바꾸는 것은 --refresh의 일이 아니다. 기존 값이 형식부터 틀렸을 때만(망가진 값 고치기) 새 값으로 쓴다.
+  if (validRepo(old.designatedRepo) && old.designatedRepo !== repo) stop('--repo가 실행 폴더 harness.json의 기존 지정 저장소 값과 다르다. --refresh는 지정 저장소를 바꾸지 않는다. 아무것도 쓰지 않고 멈춘다.', 1);
   if (typeof old.projectName === 'string') project = { name: old.projectName, source: null };
 }
 if (projectArg && refresh) stop('--project는 처음 설치할 때만 쓴다. --refresh는 기존 대상 프로젝트를 그대로 둔다.', 1);

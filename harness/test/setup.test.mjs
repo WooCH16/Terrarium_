@@ -67,6 +67,62 @@ test('refresh rewrites role files only', () => {
   assert.equal(readFileSync(join(run, 'memo', 'marker.txt'), 'utf8'), 'keep');
 });
 
+// run-18: `--repo undefined`로 --refresh를 불러 harness.json의 지정 저장소가 글자 undefined로 덮였다.
+const setupRaw = (args) => spawnSync(process.execPath, [join(harnessDir, 'setup.mjs'), ...args], { encoding: 'utf8' });
+const hashTree = (dir) => Object.fromEntries(readdirSync(dir, { recursive: true }).map((p) => join(dir, p)).filter((p) => statSync(p).isFile()).sort().map((p) => [p, readFileSync(p, 'utf8')]));
+
+test('--repo가 owner/name 형식이 아니면 usage와 이유를 쓰고 종료 코드 1, 아무 파일도 쓰지 않는다', () => {
+  for (const bad of ['undefined', 'a/b/c', '/x', 'x/', '', 'owner/name.git', 'own er/name']) {
+    const parent = mkdtempSync(join(tmpdir(), 'setup-'));
+    const run = join(parent, 'run');
+    const r = setupRaw(['--run', run, '--repo', bad, '--no-clone']);
+    assert.equal(r.status, 1, `${JSON.stringify(bad)}: ${r.stderr}`);
+    assert.match(r.stderr, /usage:/, bad);
+    assert.match(r.stderr, /owner\/name 형식이 아니다/, bad);
+    assert.deepEqual(readdirSync(parent), [], `${JSON.stringify(bad)}: 아무것도 쓰지 않는다`);
+  }
+  // --repo 값이 아예 없을 때도 같다
+  const parent = mkdtempSync(join(tmpdir(), 'setup-'));
+  const r = setupRaw(['--run', join(parent, 'run'), '--no-clone', '--repo']);
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /usage:/);
+  assert.deepEqual(readdirSync(parent), []);
+});
+
+test('--refresh에 형식이 틀린 --repo를 주면 기존 실행 폴더를 하나도 바꾸지 않는다', () => {
+  const run = runSetup();
+  const before = hashTree(run);
+  const r = setupRaw(['--run', run, '--repo', 'undefined', '--refresh']);
+  assert.equal(r.status, 1, r.stderr);
+  assert.deepEqual(hashTree(run), before);
+});
+
+test('--refresh에서 --repo가 기존 지정 저장소와 다르면 덮어쓰지 않고 종료 코드 1, 같으면 지금처럼 다시 쓴다', () => {
+  const run = runSetup();
+  writeFileSync(join(run, 'CLAUDE.md'), 'stale');
+  const before = hashTree(run);
+  const r = setupRaw(['--run', run, '--repo', 'owner/other-issues', '--refresh']);
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /기존 지정 저장소 값과 다르다/);
+  assert.ok(!r.stderr.includes(REPO), '기존 값은 출력하지 않는다');
+  assert.deepEqual(hashTree(run), before, 'harness.json과 다른 파일이 그대로다');
+  assert.equal(JSON.parse(readFileSync(join(run, 'harness.json'), 'utf8')).designatedRepo, REPO);
+
+  const same = setupRaw(['--run', run, '--repo', REPO, '--refresh']);
+  assert.equal(same.status, 0, same.stderr);
+  assert.notEqual(readFileSync(join(run, 'CLAUDE.md'), 'utf8'), 'stale');
+  assert.equal(JSON.parse(readFileSync(join(run, 'harness.json'), 'utf8')).designatedRepo, REPO);
+});
+
+test('--refresh: 기존 지정 저장소 값이 형식부터 틀렸으면(망가진 값) 올바른 --repo로 고칠 수 있다', () => {
+  const run = runSetup();
+  const cfg = JSON.parse(readFileSync(join(run, 'harness.json'), 'utf8'));
+  writeFileSync(join(run, 'harness.json'), JSON.stringify({ ...cfg, designatedRepo: 'undefined' }, null, 2));
+  const r = setupRaw(['--run', run, '--repo', REPO, '--refresh']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(readFileSync(join(run, 'harness.json'), 'utf8')).designatedRepo, REPO);
+});
+
 test('memo repo has one commit and passing tests', () => {
   const run = runSetup();
   const log = spawnSync('git', ['-C', join(run, 'memo'), 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' });
