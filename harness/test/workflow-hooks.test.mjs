@@ -79,6 +79,27 @@ test('S9: 다른 역할(작업·조사·반영 오퍼레이터, 워커, 어드�
   for (const c of [...scripts, ...DIRECT]) refuse(c, base, { agent_type: 'advisor' });
 });
 
+test('8-35: 강제 push는 push-branch 안에서만(다시 만든 integration/h<N>, --force-with-lease). 직접 강제 push와 강제 플래그는 모두 거부', async () => {
+  const FORCE = [
+    'git push --force-with-lease origin integration/h1', `git push --force-with-lease=refs/heads/integration/h1:${'a'.repeat(40)} origin integration/h1:integration/h1`,
+    'git push origin +integration/h1', 'git push origin +integration/h1:integration/h1', 'git push -f origin integration/h1', 'git push --force origin h1/issue-1',
+    `git -C ${run}/memo push --force-with-lease origin integration/h1`, 'git push --force-with-lease origin main', 'git push origin +main',
+  ];
+  const roles = [base, { ...base, role: 'operator-work', handoff: 'h1' }, { ...base, role: 'operator-reflect', handoff: 'h1' }];
+  for (const config of roles) for (const c of FORCE) refuse(c, config);
+  for (const flag of ['--force', '--force-with-lease', '--rebuild', '-f', '--lease']) {
+    refuse(`${PB} --branch integration/h1 ${flag}`);
+    refuse(`${PB} ${flag} --branch integration/h1`);
+  }
+  refuse(`${PB} --branch +integration/h1`);
+  allow(`${PB} --branch integration/h1`);
+  // 스크립트의 강제 push 인자는 integration/h<N>에서만 나온다
+  const { forcePushArgs, parseArgs } = await import('../operator/push-branch.mjs');
+  assert.throws(() => parseArgs(['--branch', 'integration/h1', '--force-with-lease']), /사용법/);
+  for (const b of ['h1/issue-1', 'main', 'train/20261122-1']) assert.throws(() => forcePushArgs('origin', b, 'a'.repeat(40)));
+  assert.match(forcePushArgs('origin', 'integration/h1', 'a'.repeat(40)).join(' '), /^push --porcelain --force-with-lease=refs\/heads\/integration\/h1:a{40} origin /);
+});
+
 test('S9: 정규식은 스크립트와 훅이 같은 것을 쓴다', async () => {
   const { parseArgs } = await import('../operator/push-branch.mjs');
   const { parseArgs: trainArgs } = await import('../operator/run-train.mjs');

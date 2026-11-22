@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { main as pushMain, parseArgs as pushArgs } from '../operator/push-branch.mjs';
+import { main as pushMain, parseArgs as pushArgs, forcePushArgs, leaseable, rebuildFile } from '../operator/push-branch.mjs';
 import { main as trainMain, parseTrainResult } from '../operator/run-train.mjs';
 import { provenIssuesOnMain, openGit } from '../operator/merge-adapter.mjs';
 
@@ -25,6 +25,7 @@ const T0 = '2026-11-22T00:00:00Z';
 let cid = 100;
 const rc = (n, body) => ({ id: ++cid, user: { login: 'rev' }, body, created_at: T0, updated_at: T0, html_url: `https://github.com/o/r/issues/${n}#issuecomment-${cid}` });
 const allowedComments = (n, sha) => [rc(n, `## 결과 보고서 (이슈 #${n})\n\n커밋 해시: ${sha}\n`), rc(n, `## 리뷰어 판정: 허용\n\n허용된 커밋: ${sha}\n이유`)];
+const rejectedComments = (n, sha) => [rc(n, `## 결과 보고서 (이슈 #${n})\n\n커밋 해시: ${sha}\n`), rc(n, '## 리뷰어 판정: 거부\n\n이유: 완료 기준 2 미충족')];
 const body = (deps = '없음') => `## 목표\nx\n\n## 의존하는 이슈\n${deps}\n\n## 참고 자료 위치\ny\n`;
 
 // 실행 폴더 하나: 대상 프로젝트(main + 이슈 브랜치 + 통합 브랜치), bare 원격, 가짜 gh 상태.
@@ -48,13 +49,15 @@ function fixture({ handoffs, target = true, allow = true, workflows = true } = {
     mkdirSync(`${run}/handoffs/${d.h}`, { recursive: true });
     if (d.base) writeFileSync(`${run}/handoffs/${d.h}/dispatch.json`, JSON.stringify({ team: d.team ?? null, base: d.base, issueBases: {} }));
     for (const n of d.issues) {
-      const start = d.base ? `${d.base}/issue-${handoffs.find((x) => x.h === d.base).issues[0]}` : 'main';
+      // d.chain[n] = m: 같은 하달의 앞 이슈 #m의 브랜치에서 시작하고 #m에 기댄다(run-11의 같은 하달 의존)
+      const dep = d.chain?.[n];
+      const start = dep ? `${d.h}/issue-${dep}` : d.base ? `${d.base}/issue-${handoffs.find((x) => x.h === d.base).issues[0]}` : 'main';
       git(memo, 'checkout', '-q', '-b', `${d.h}/issue-${n}`, start);
       writeFileSync(`${memo}/f${n}.txt`, `${n}\n`);
       git(memo, 'add', '-A');
       git(memo, 'commit', '-q', '-m', `이슈 #${n}`);
       tips[n] = git(memo, 'rev-parse', 'HEAD');
-      issues[n] = { body: body(d.base ? `#${handoffs.find((x) => x.h === d.base).issues[0]}` : '없음'), labels: ['리뷰대기'], comments: allow ? allowedComments(n, tips[n]) : [] };
+      issues[n] = { body: body(dep ? `#${dep}` : d.base ?`#${handoffs.find((x) => x.h === d.base).issues[0]}` : '없음'), labels: ['리뷰대기'], comments: allow ? allowedComments(n, tips[n]) : [] };
     }
     git(memo, 'checkout', '-q', '-b', `integration/${d.h}`, 'main');
     for (const n of d.issues) git(memo, 'merge', '-q', '--no-ff', `${d.h}/issue-${n}`, '-m', `통합: 이슈 #${n}`);
@@ -317,15 +320,256 @@ test('트레인 결과 줄 읽기: 표지 뒤 JSON, 모르는 하달·모양이 
   assert.equal(parseTrainResult('nothing', ['h1']), null);
 });
 
-test('섞인 하달(허용 하나, 판정 없음 하나): 이슈 PR은 올라가지만 통합 브랜치는 거부(종료 코드 2), 끝 보고에 물을 것을 알린다', T, async () => {
+// 결정 8-35 이전에는 섞인 하달을 종료 코드 2로 거부했다. 이제 판정 전 이슈가 섞인 때만 거부하고, 반려된 이슈만 빼고 다시 만든다(아래 시험들).
+test('섞인 하달(허용 하나, 판정 전 하나): 판정 전 이슈는 빼지 않고 통합 브랜치를 거부(종료 코드 2), 아무것도 바꾸지 않는다', T, async () => {
   const f = fixture({ handoffs: [{ h: 'h1', issues: [1, 2] }] });
   f.patch((s) => { s.issues[2].comments = []; });
+  const integBefore = git(f.memo, 'rev-parse', 'refs/heads/integration/h1');
   assert.equal((await push(f, 'h1/issue-1')).code, 0);
   assert.equal((await push(f, 'h1/issue-2')).code, 2);
   const r = await push(f, 'integration/h1');
   assert.equal(r.code, 2);
-  assert.match(r.errs.join('\n'), /#2의 커밋이 있습니다\. 이 하달은 하달 PR·트레인으로 갈 수 없습니다[^\n]*run-reflect/);
+  assert.match(r.errs.join('\n'), /판정 전인 #2의 커밋이 있습니다/);
   assert.equal(f.state().prs.filter((p) => p.baseRefName === 'main').length, 0);
+  assert.equal(git(f.memo, 'rev-parse', 'refs/heads/integration/h1'), integBefore, '로컬 통합 브랜치도 그대로');
+  assert.equal(existsSync(`${f.run}/handoffs/h1/rebuilt.json`), false);
+});
+
+const hasFile = (f, sha, name) => gitTry(f.remote, 'cat-file', '-e', `${sha}:${name}`) !== null;
+
+test('8-35 섞인 하달: 허용 #1, CI로 미완료된 #2(독립) → 통합 브랜치를 #1만으로 다시 만들어 하달 PR, #2는 반려. 재작업 h2 → 옛 이슈 PR 닫힘·브랜치 지움, 트레인 뒤 정리', T, async () => {
+  const f = fixture({ handoffs: [{ h: 'h1', issues: [1, 2] }] });
+  const oldInteg = git(f.memo, 'rev-parse', 'refs/heads/integration/h1');
+  assert.equal((await push(f, 'h1/issue-1')).code, 0);
+  f.patch((s) => { s.ci['h1/issue-2'] = 'fail'; });
+  assert.equal((await push(f, 'h1/issue-2')).code, 1, '이슈 PR CI 실패 → #2 미완료');
+  assert.deepEqual(f.state().issues[2].labels, ['미완료']);
+  const r = await push(f, 'integration/h1');
+  assert.equal(r.code, 0, r.errs.join('\n'));
+  assert.equal(r.json.ci, 'pass');
+  assert.deepEqual(r.json.issues, [1]);
+  assert.equal(r.json.rebuilt.from, oldInteg);
+  assert.deepEqual(r.json.rebuilt.kept, [1]);
+  assert.deepEqual(r.json.rebuilt.returned, [{ issue: 2, reason: '상태가 미완료' }]);
+  assert.deepEqual(r.json.rebuilt.held, []);
+  const newInteg = git(f.memo, 'rev-parse', 'refs/heads/integration/h1');
+  assert.notEqual(newInteg, oldInteg);
+  assert.equal(r.json.sha, newInteg);
+  assert.equal(git(f.remote, 'rev-parse', 'refs/heads/integration/h1'), newInteg);
+  assert.ok(hasFile(f, newInteg, 'f1.txt') && !hasFile(f, newInteg, 'f2.txt'), '다시 만든 통합 브랜치에는 #1만');
+  assert.deepEqual(git(f.memo, 'log', '--format=%s', '--first-parent', `main..${newInteg}`).split('\n'), ['통합: 이슈 #1']);
+  const s = f.state();
+  const hp = s.prs.find((p) => p.headRefName === 'integration/h1' && p.baseRefName === 'main');
+  assert.equal(hp.state, 'OPEN');
+  assert.equal(hp.headRefOid, newInteg);
+  assert.deepEqual(s.issues[2].labels, ['미완료'], '반려된 이슈는 미완료 그대로(재작업은 새 하달)');
+  assert.match(s.issues[2].comments.at(-1).body, /^## 통합 브랜치 다시 만듦 \(결정 8-35\)[\s\S]*반려\(상태가 미완료\)[\s\S]*새 하달/);
+  assert.deepEqual(writes(s), [], '하네스는 PR을 쓰지 않는다');
+  // 다시 불러도 다시 만들지 않는다(같은 끝, 읽기만)
+  const again = await push(f, 'integration/h1');
+  assert.equal(again.code, 0);
+  assert.equal(again.json.pushed, 'already');
+  assert.equal(again.json.rebuilt.to, newInteg);
+  assert.equal(git(f.memo, 'rev-parse', 'refs/heads/integration/h1'), newInteg);
+  assert.equal(JSON.parse(readFileSync(`${f.run}/handoffs/h1/rebuilt.json`, 'utf8')).length, 1);
+
+  // 재작업: 새 하달 h2의 #2(독립이라 main에서 시작). 허용되면 이슈 PR이 열리고 옛 h1/issue-2 이슈 PR은 닫히고 원격 브랜치는 지워진다.
+  mkdirSync(`${f.run}/handoffs/h2`, { recursive: true });
+  git(f.memo, 'checkout', '-q', '-b', 'h2/issue-2', 'main');
+  writeFileSync(`${f.memo}/f2.txt`, '2 again\n');
+  git(f.memo, 'add', '-A');
+  git(f.memo, 'commit', '-q', '-m', '이슈 #2 재작업');
+  const t2 = git(f.memo, 'rev-parse', 'HEAD');
+  git(f.memo, 'checkout', '-q', '-b', 'integration/h2', 'main');
+  git(f.memo, 'merge', '-q', '--no-ff', 'h2/issue-2', '-m', '통합: 이슈 #2');
+  git(f.memo, 'checkout', '-q', 'main');
+  f.patch((st) => { st.ci['h1/issue-2'] = 'pass'; st.issues[2].comments.push(...allowedComments(2, t2)); st.issues[2].labels = ['리뷰대기']; });
+  assert.equal((await push(f, 'h2/issue-2')).code, 0);
+  const s2 = f.state();
+  const old = s2.prs.find((p) => p.headRefName === 'h1/issue-2');
+  assert.equal(old.state, 'CLOSED');
+  assert.equal(old.closeComment, 'h2에서 다시 함');
+  assert.ok(s2.deleted.includes('h1/issue-2'));
+  assert.equal(gitTry(f.remote, 'rev-parse', '--verify', '--quiet', 'refs/heads/h1/issue-2'), null);
+  assert.ok(gitTry(f.remote, 'rev-parse', '--verify', '--quiet', 'refs/heads/integration/h1'), '하달 PR이 열린 integration/h1은 남는다');
+  assert.ok(gitTry(f.remote, 'rev-parse', '--verify', '--quiet', 'refs/heads/h1/issue-1'));
+  assert.equal(s2.prs.find((p) => p.headRefName === 'h2/issue-2').state, 'OPEN');
+  assert.equal((await push(f, 'integration/h2')).code, 0);
+
+  // 트레인(h1 → h2): 통과하면 원격의 하달 브랜치·트레인 브랜치를 지우고, 로컬 하달 이름 공간도 치운다. main은 지우지 않는다.
+  const tr = await train(f, 'h1,h2');
+  assert.equal(tr.code, 0, tr.errs.join('\n'));
+  assert.deepEqual(tr.json.merged, ['h1', 'h2']);
+  assert.deepEqual(tr.json.cleanup, { h1: '정리함', h2: '정리함' });
+  const remoteLeft = git(f.remote, 'for-each-ref', '--format=%(refname:lstrip=2)', 'refs/heads/').split('\n').filter(Boolean);
+  assert.deepEqual(remoteLeft, ['main']);
+  const localLeft = git(f.memo, 'for-each-ref', '--format=%(refname:lstrip=2)', 'refs/heads/').split('\n').filter(Boolean);
+  assert.deepEqual(localLeft, ['main']);
+  const s3 = f.state();
+  assert.deepEqual(s3.issues[1].labels, ['반영됨']);
+  assert.deepEqual(s3.issues[2].labels, ['반영됨']);
+  assert.ok(s3.prs.every((p) => p.state !== 'OPEN'), '열린 PR이 남지 않는다');
+  assert.deepEqual(s3.refusedDeletes ?? [], []);
+  assert.ok(existsSync(`${f.run}/handoffs/h1/train.json`), '기록은 남는다');
+  const { git: g } = openGit({});
+  assert.deepEqual([...provenIssuesOnMain(g, { memo: f.memo, run: f.run })].sort(), [1, 2]);
+});
+
+test('8-35 순서가 바뀌어도: 재작업 하달 h2가 먼저 돌고(#2 리뷰대기·허용) 나서 integration/h1을 올리면 #2는 반려(h2에서 재작업 중)로 빼고 라벨·댓글은 건드리지 않는다', T, async () => {
+  const f = fixture({ handoffs: [{ h: 'h1', issues: [1, 2] }] });
+  assert.equal((await push(f, 'h1/issue-1')).code, 0);
+  f.patch((s) => { s.ci['h1/issue-2'] = 'fail'; });
+  assert.equal((await push(f, 'h1/issue-2')).code, 1);
+  // 이슈 PR CI 실패 뒤 바로 재작업 하달 h2: 합치기가 #2를 리뷰대기로 두고, 리뷰어가 아직 판정하기 전(마지막 판정은 옛 허용)
+  mkdirSync(`${f.run}/handoffs/h2`, { recursive: true });
+  git(f.memo, 'checkout', '-q', '-b', 'h2/issue-2', 'main');
+  writeFileSync(`${f.memo}/f2.txt`, '2 again\n');
+  git(f.memo, 'add', '-A');
+  git(f.memo, 'commit', '-q', '-m', '이슈 #2 재작업');
+  const t2 = git(f.memo, 'rev-parse', 'HEAD');
+  git(f.memo, 'checkout', '-q', 'main');
+  f.patch((s) => { s.issues[2].labels = ['리뷰대기']; s.issues[2].comments.push(rc(2, `## 결과 보고서 (이슈 #2)\n\n커밋 해시: ${t2}\n`)); });
+  const before = f.state().issues[2].comments.length;
+  const r = await push(f, 'integration/h1');
+  assert.equal(r.code, 0, r.errs.join('\n'));
+  assert.deepEqual(r.json.rebuilt.kept, [1]);
+  assert.deepEqual(r.json.rebuilt.returned, [{ issue: 2, reason: 'h2에서 재작업 중' }]);
+  assert.deepEqual(f.state().issues[2].labels, ['리뷰대기'], '뒤 하달의 라벨을 건드리지 않는다');
+  assert.equal(f.state().issues[2].comments.length, before, '댓글도 남기지 않는다');
+  // h2가 허용되면 그대로 올라간다
+  f.patch((s) => { s.issues[2].comments.push(rc(2, `## 리뷰어 판정: 허용\n\n허용된 커밋: ${t2}\n이유`)); s.ci['h1/issue-2'] = 'pass'; });
+  assert.equal((await push(f, 'h2/issue-2')).code, 0);
+  assert.equal(f.state().prs.find((p) => p.headRefName === 'h1/issue-2').state, 'CLOSED');
+  const again = await push(f, 'integration/h1');
+  assert.equal(again.code, 0, again.errs.join('\n'));
+  assert.equal(again.json.pushed, 'already');
+});
+
+test('8-35 섞인 하달: 허용 #3이 거부된 #2에 기대면(#2 브랜치에서 시작) #3도 빼고 대기, 통합 브랜치는 #1만', T, async () => {
+  const f = fixture({ handoffs: [{ h: 'h1', issues: [1, 2, 3], chain: { 3: 2 } }] });
+  f.patch((s) => { s.issues[2].comments = rejectedComments(2, f.tips[2]); s.issues[2].labels = ['미완료']; });
+  for (const b of ['h1/issue-1', 'h1/issue-3']) assert.equal((await push(f, b)).code, 0, b);
+  const r = await push(f, 'integration/h1');
+  assert.equal(r.code, 0, r.errs.join('\n'));
+  assert.deepEqual(r.json.issues, [1]);
+  assert.deepEqual(r.json.rebuilt.kept, [1]);
+  assert.deepEqual(r.json.rebuilt.returned.map((x) => x.issue), [2]);
+  assert.deepEqual(r.json.rebuilt.held.map((x) => x.issue), [3]);
+  assert.match(r.json.rebuilt.held[0].reason, /#2/);
+  assert.ok(hasFile(f, r.json.sha, 'f1.txt') && !hasFile(f, r.json.sha, 'f2.txt') && !hasFile(f, r.json.sha, 'f3.txt'));
+  const s = f.state();
+  assert.deepEqual(s.issues[3].labels, ['대기'], '반려된 이슈와 함께 새 하달로');
+  assert.match(s.issues[3].comments.at(-1).body, /^## 통합 브랜치 다시 만듦[\s\S]*함께 새 하달/);
+  // 거부 판정만 있고 라벨이 아직 없어도 반려로 본다(미완료로 둔다)
+  const g2 = fixture({ handoffs: [{ h: 'h1', issues: [1, 2] }] });
+  g2.patch((s2) => { s2.issues[2].comments = rejectedComments(2, g2.tips[2]); });
+  const r2 = await push(g2, 'integration/h1');
+  assert.equal(r2.code, 0, r2.errs.join('\n'));
+  assert.deepEqual(r2.json.rebuilt.returned, [{ issue: 2, reason: '리뷰어 거부' }]);
+  assert.deepEqual(g2.state().issues[2].labels, ['미완료']);
+  // 모두 반려되면 남길 것이 없어 거부(종료 코드 2), 아무것도 올리지 않는다
+  const g3 = fixture({ handoffs: [{ h: 'h1', issues: [1] }] });
+  g3.patch((s3) => { s3.issues[1].labels = ['미완료']; });
+  const r3 = await push(g3, 'integration/h1');
+  assert.equal(r3.code, 2);
+  assert.match(r3.errs.join('\n'), /남길 허용된 이슈가 없습니다/);
+  assert.equal(gitTry(g3.remote, 'rev-parse', '--verify', '--quiet', 'refs/heads/integration/h1'), null);
+});
+
+test('8-35 강제 push: 이미 올린 통합 브랜치를 다시 만들면 --force-with-lease(옛 끝)로만 덮고, 원격이 예상 밖으로 움직였으면 거부', T, async () => {
+  const f = fixture({ handoffs: [{ h: 'h1', issues: [1, 2] }] });
+  for (const b of ['h1/issue-1', 'h1/issue-2', 'integration/h1']) assert.equal((await push(f, b)).code, 0, b);
+  const oldInteg = git(f.remote, 'rev-parse', 'refs/heads/integration/h1');
+  f.patch((s) => { s.issues[2].labels = ['미완료']; });
+  const calls = [];
+  const remoteGit = (cwd, args) => { calls.push(args); return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); };
+  const lines = [];
+  const errs = [];
+  const code = await pushMain(['--branch', 'integration/h1'], f.env, { write: (l) => lines.push(l), writeErr: (l) => errs.push(l), remoteGit });
+  assert.equal(code, 0, errs.join('\n'));
+  const j = JSON.parse(lines.at(-1));
+  assert.equal(j.pushed, 'forced');
+  assert.equal(j.rebuilt.from, oldInteg);
+  assert.equal(git(f.remote, 'rev-parse', 'refs/heads/integration/h1'), j.sha);
+  const pushes = calls.filter((a) => a[0] === 'push');
+  assert.deepEqual(pushes, [['push', '--porcelain', `--force-with-lease=refs/heads/integration/h1:${oldInteg}`, f.remote, 'refs/heads/integration/h1:refs/heads/integration/h1']]);
+  const hp = f.state().prs.find((p) => p.headRefName === 'integration/h1');
+  assert.equal(hp.state, 'OPEN', '하달 PR은 닫지 않고 새 끝으로 갱신');
+  assert.equal(hp.headRefOid, j.sha);
+
+  // 원격이 예상 밖으로 움직였으면(기록에 없는 끝) 강제로 덮지 않는다
+  const g2 = fixture({ handoffs: [{ h: 'h1', issues: [1, 2] }] });
+  for (const b of ['h1/issue-1', 'h1/issue-2', 'integration/h1']) assert.equal((await push(g2, b)).code, 0, b);
+  git(g2.memo, 'branch', 'tmp-side', 'integration/h1');
+  git(g2.memo, 'checkout', '-q', 'tmp-side');
+  writeFileSync(`${g2.memo}/side.txt`, 's\n');
+  git(g2.memo, 'add', '-A');
+  git(g2.memo, 'commit', '-q', '-m', 'side');
+  const side = git(g2.memo, 'rev-parse', 'HEAD');
+  git(g2.memo, 'checkout', '-q', 'main');
+  execFileSync('git', ['-C', g2.memo, 'push', '-q', g2.remote, `${side}:refs/heads/integration/h1`]);
+  g2.patch((s) => { s.issues[2].labels = ['미완료']; });
+  const r2 = await push(g2, 'integration/h1');
+  assert.equal(r2.code, 2);
+  assert.match(r2.errs.join('\n'), /강제로 올리지 않습니다/);
+  assert.equal(git(g2.remote, 'rev-parse', 'refs/heads/integration/h1'), side, '원격은 그대로');
+  const r3 = await push(g2, 'integration/h1');
+  assert.equal(r3.code, 2, '다시 불러도 덮지 않는다');
+  assert.equal(git(g2.remote, 'rev-parse', 'refs/heads/integration/h1'), side);
+});
+
+test('8-35 강제 push 인자는 integration/h<N> 모양과 40자리 예상 끝일 때만 만든다', () => {
+  const sha = 'a'.repeat(40);
+  assert.deepEqual(forcePushArgs('o', 'integration/h3', sha), ['push', '--porcelain', `--force-with-lease=refs/heads/integration/h3:${sha}`, 'o', 'refs/heads/integration/h3:refs/heads/integration/h3']);
+  for (const b of ['main', 'h1/issue-1', 'train/20261122-1', 'feature/x', 'integration/h0', 'integration/h1/x', 'refs/heads/integration/h1', '+integration/h1', undefined]) {
+    assert.throws(() => forcePushArgs('o', b, sha), /integration\/h<N>만/, String(b));
+  }
+  for (const e of ['', 'abc', null, 'A'.repeat(40)]) assert.throws(() => forcePushArgs('o', 'integration/h1', e), /예상 원격 끝/);
+});
+
+test('8-35 rebuilt.json: 로컬 끝이 마지막 다시 만든 결과일 때만 옛 끝들을 덮을 수 있다', () => {
+  const root = mkdtempSync(join(tmpdir(), 'rebuilt-')).replace(/\\/g, '/');
+  made.push(root);
+  mkdirSync(`${root}/handoffs/h1`, { recursive: true });
+  const [a, b, c] = ['a', 'b', 'c'].map((x) => x.repeat(40));
+  assert.deepEqual(leaseable(root, 'h1', b), []);
+  writeFileSync(rebuildFile(root, 'h1'), JSON.stringify([{ from: a, to: b }]));
+  assert.deepEqual(leaseable(root, 'h1', b), [a]);
+  assert.deepEqual(leaseable(root, 'h1', c), [], '기록에 없는 끝이면 덮지 않는다');
+  writeFileSync(rebuildFile(root, 'h1'), JSON.stringify([{ from: a, to: b }, { from: b, to: c }]));
+  assert.deepEqual(leaseable(root, 'h1', c).sort(), [a, b]);
+  assert.deepEqual(leaseable(root, 'h1', b), []);
+  writeFileSync(rebuildFile(root, 'h1'), 'not json');
+  assert.deepEqual(leaseable(root, 'h1', c), []);
+});
+
+test('8-35 트레인 실패 길: 원격 브랜치·PR을 지우지 않고 로컬도 치우지 않는다', T, async () => {
+  const f = fixture({ handoffs: [{ h: 'h1', issues: [1] }] });
+  for (const b of ['h1/issue-1', 'integration/h1']) assert.equal((await push(f, b)).code, 0, b);
+  f.patch((s) => { s.trainFail = ['h1']; });
+  const before = git(f.remote, 'for-each-ref', '--format=%(refname:lstrip=2)', 'refs/heads/');
+  const r = await train(f, 'h1');
+  assert.equal(r.code, 1);
+  assert.equal(r.json.cleanup, undefined);
+  assert.equal(git(f.remote, 'for-each-ref', '--format=%(refname:lstrip=2)', 'refs/heads/'), before);
+  assert.deepEqual(f.state().deleted ?? [], []);
+  assert.ok(gitTry(f.memo, 'rev-parse', '--verify', '--quiet', 'refs/heads/h1/issue-1'));
+});
+
+test('8-35 코디네이터 규칙: 섞인 하달은 묻지 않고 반려(재작업 하달, 필요하면 --base), 다시 만든 통합 브랜치는 상태 표에', () => {
+  const flow = readFileSync(`${realHarness}/coordinator/skills/coordinator-issue-flow/SKILL.md`, 'utf8');
+  assert.match(flow, /8-35/);
+  assert.match(flow, /반려/);
+  assert.match(flow, /rebuilt/);
+  assert.match(flow, /--base h<N>/);
+  assert.doesNotMatch(flow, /허용된 이슈만 `run-reflect`/, '옛 "결정할 것" 선택지는 없다');
+  const exc = readFileSync(`${realHarness}/coordinator/skills/coordinator-exceptions/SKILL.md`, 'utf8');
+  assert.match(exc, /섞인 하달/);
+  const rec = readFileSync(`${realHarness}/coordinator/skills/coordinator-records/SKILL.md`, 'utf8');
+  assert.match(rec, /반려/);
+  const agent = readFileSync(`${realHarness}/coordinator/AGENT.md`, 'utf8');
+  assert.match(agent, /8-35/);
+  assert.doesNotMatch(agent, /하달의 이슈가 모두 허용되면 `push-branch\.mjs --branch integration/);
 });
 
 test('run-train: 트레인이 통과하면 반영 안 된 이슈가 있어도 종료 코드 0(1은 트레인 실패에만)', T, async () => {

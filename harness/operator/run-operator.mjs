@@ -218,7 +218,8 @@ export async function main(argv, env = process.env, deps = {}) {
       if (!existsSync(`${run}/handoffs/${baseWanted}`)) return fail(`시작 지점 하달 ${baseWanted} 폴더가 없습니다.`);
       let found;
       try { found = unreflectedTips(git, memo, baseWanted); } catch { return fail(`시작 지점 하달 ${baseWanted}의 브랜치를 읽을 수 없습니다.`); }
-      if (found.count === 0) return fail(`시작 지점 하달 ${baseWanted}에 이슈 브랜치가 없습니다(중단·정리됐을 수 있습니다). --base 없이 하달하거나 사용자에게 알리세요.`);
+      // 머지 트레인으로 main에 들어가 run-train이 이름 공간을 치운 하달(train.json이 남음, 결정 8-35)은 이미 반영된 것으로 보고 main에서 시작한다.
+      if (found.count === 0 && !existsSync(`${run}/handoffs/${baseWanted}/train.json`)) return fail(`시작 지점 하달 ${baseWanted}에 이슈 브랜치가 없습니다(중단·정리됐을 수 있습니다). --base 없이 하달하거나 사용자에게 알리세요.`);
       if (found.tips.size > 0) { base = baseWanted; baseTips = found.tips; }
     }
 

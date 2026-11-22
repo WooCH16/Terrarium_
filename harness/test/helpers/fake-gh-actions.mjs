@@ -5,6 +5,8 @@
 //   pr checks는 state.ci[<브랜치>](pass·fail·pending, 기본 pass)로 답한다
 //   workflow run harness-train.yml은 bare 저장소에서 진짜로 트레인을 쌓고, 통과하면 main을 빨리감기, 실패하면 맨 뒤부터 빼며 실패 하달을 찾는다
 //   (state.trainFail: 쌓이면 CI가 실패하는 하달 목록). 결과는 실행 기록(run view --log)에 HARNESS_TRAIN_RESULT 줄로 남는다
+//   통과하면 그 하달들의 남은 이슈 PR을 닫고 integration/h*, h*/issue-*, train/… 원격 브랜치를 지운다(결정 8-35). 실패하면 지우지 않는다
+// - 새 h<M>/issue-<X>를 보면 같은 이슈의 앞선 하달 브랜치의 열린 이슈 PR을 닫고 그 브랜치를 지운다(결정 8-35). 닫기·지우기는 state.prs·state.deleted에 남는다
 // - 모든 호출은 state.calls에 남는다(시험이 "무엇을 불렀나"를 단언한다).
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -74,6 +76,7 @@ function syncPr(head, base) {
   const h = bareSha(head);
   const b = bareSha(base);
   if (!h || !b) return;
+  closeOlder(head);
   const open = S.prs.find((p) => p.headRefName === head && p.baseRefName === base && p.state === 'OPEN');
   const ahead = Number(gitTry(S.remote, 'rev-list', '--count', `${b}..${h}`) ?? '0');
   if (open) {
@@ -84,6 +87,45 @@ function syncPr(head, base) {
   if (ahead === 0 || S.noPr?.includes(head)) return; // 앞선 커밋이 없으면 Actions도 PR을 열지 않는다
   const number = (S.nextPr = (S.nextPr ?? 0) + 1);
   S.prs.push({ number, url: prUrl(number), headRefName: head, baseRefName: base, headRefOid: h, state: 'OPEN', openedBy: 'actions' });
+}
+
+// 결정 8-35 (harness-issue-pr.yml 흉내): 새 h<M>/issue-<X>가 올라오면 같은 이슈의 앞선 하달(h<N>, N < M) 브랜치의 열린 이슈 PR을 닫고 그 원격 브랜치를 지운다.
+// 그 하달의 이슈 브랜치가 하나도 남지 않고 열린 하달 PR도 없으면 integration/h<N>도 지운다. 지우기는 세 모양만(SAFE).
+const SAFE = /^(h[1-9][0-9]{0,8}\/issue-[1-9][0-9]{0,8}|integration\/h[1-9][0-9]{0,8}|train\/[0-9]{8}-[0-9]{1,9})$/;
+const remoteBranches = () => (gitTry(S.remote, 'for-each-ref', '--format=%(refname:lstrip=2)', 'refs/heads/') ?? '').split('\n').filter(Boolean);
+function deleteBranch(b) {
+  if (b === 'main' || !SAFE.test(b)) { S.refusedDeletes = [...(S.refusedDeletes ?? []), b]; return; }
+  if (gitTry(S.remote, 'update-ref', '-d', `refs/heads/${b}`) !== null) S.deleted = [...(S.deleted ?? []), b];
+}
+function closePr(p, text) { p.state = 'CLOSED'; p.closedBy = 'actions'; p.closeComment = text; }
+function closeOlder(head) {
+  const m = /^h([1-9][0-9]{0,8})\/issue-([1-9][0-9]{0,8})$/.exec(head);
+  if (!m) return;
+  const M = Number(m[1]);
+  const touched = new Set();
+  for (const b of remoteBranches()) {
+    const o = /^h([1-9][0-9]{0,8})\/issue-([1-9][0-9]{0,8})$/.exec(b);
+    if (!o || o[2] !== m[2] || Number(o[1]) >= M) continue;
+    for (const p of S.prs) if (p.headRefName === b && p.state === 'OPEN') closePr(p, `h${M}에서 다시 함`);
+    deleteBranch(b);
+    touched.add(`h${o[1]}`);
+  }
+  for (const h of touched) {
+    const left = remoteBranches().some((b) => b.startsWith(`${h}/issue-`));
+    const openHandoff = S.prs.some((p) => p.headRefName === `integration/${h}` && p.state === 'OPEN');
+    if (!left && !openHandoff && bareSha(`integration/${h}`)) deleteBranch(`integration/${h}`);
+  }
+}
+// harness-train.yml 흉내: 트레인이 main에 들어간 뒤 그 하달들의 이슈 PR을 닫고 integration/h*, h*/issue-*, train/… 브랜치를 지운다.
+function cleanAfterTrain(handoffs, train) {
+  for (const h of handoffs) {
+    for (const b of remoteBranches().filter((x) => x.startsWith(`${h}/issue-`))) {
+      for (const p of S.prs) if (p.headRefName === b && p.state === 'OPEN') closePr(p, `머지 트레인 ${train} 뒤 정리`);
+      deleteBranch(b);
+    }
+    deleteBranch(`integration/${h}`);
+  }
+  deleteBranch(train);
 }
 if (a0 === 'pr' && a1 === 'list') {
   const head = flag('--head');
@@ -131,6 +173,7 @@ if (a0 === 'workflow' && a1 === 'run') {
     if (full.ok) {
       git(w, 'push', '-q', 'origin', `${full.tip}:refs/heads/${train}`, `${full.tip}:refs/heads/main`);
       for (const p of S.prs) if (p.baseRefName === 'main' && handoffs.some((h) => p.headRefName === `integration/${h}`) && p.state === 'OPEN') p.state = 'MERGED';
+      cleanAfterTrain(handoffs, train);
       result = { result: 'merged', train, merged: handoffs, failedHandoff: null, passingPrefix: handoffs, mainAfter: full.tip };
     } else {
       let k = handoffs.length - 1;

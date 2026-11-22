@@ -7,6 +7,9 @@
 //      main에 쓰는 것은 Actions뿐이다. 이 스크립트는 원격 main을 건드리지 않는다.
 //   4. 통과하면 실행 폴더의 대상 프로젝트 main을 원격 main으로 빨리감기만 하고(따라가기, 조상일 때만), 반영된 이슈에 반영됨을 붙이고
 //      handoffs/h<N>/train.json에 남긴다(의존 이슈의 "main에 있음" 판단에 쓴다). 실패하면 main은 그대로다(부분 머지는 사용자에게 묻는다).
+//   5. 통과하고 로컬 main이 원격 main을 따라갔으면(같음·따라감) 들어간 하달마다 실행 폴더의 대상 프로젝트에서 그 하달의 이름 공간
+//      (worktrees/h<N>/, integration/h<N>, h<N>/* 브랜치)을 하달 정리(cleanupHandoff)와 같은 방식으로 치운다(결정 8-35). 원격 브랜치·PR은 트레인 워크플로가 치운다.
+//      정리 실패는 결과(종료 코드)를 바꾸지 않고 cleanup 칸에 적는다.
 //   대상 원격이나 트레인 워크플로가 없으면(결정 4) 지금의 로컬 흐름(run-reflect)을 순서대로 돌리고 "CI 없음"을 보고한다.
 // 출력: JSON 한 줄. 종료 코드: 0 트레인 통과(반영되지 않은 이슈는 rows에 보류로) 또는 로컬 흐름 정상, 1 트레인 실패(main 그대로) 또는 로컬 흐름의 막힘·보류, 2 설정·인자·순서 실패(시작 안 함), 5 기다림 한도 초과, 8 분리 실행 진행 중.
 import { existsSync, writeFileSync, renameSync } from 'node:fs';
@@ -16,6 +19,7 @@ import { TRAIN_HANDOFFS } from '../policy.mjs';
 import { readRun, targetOf, makeGh, makeRemoteGit, hasWorkflow, findPr, poll, trainWait, WORKFLOWS, FlowError, ONE_LINE, fwd } from './github-flow.mjs';
 import { openGit, isAnc, discoverTips, baseOrderProblem, collectAllowed, makeFetchIssueData, advanceBranch, runScript, trainRecordFile } from './merge-adapter.mjs';
 import { makeGhDeps } from './run-operator.mjs';
+import { cleanupHandoff } from './launch.mjs';
 import { LABEL, TRAIN_RESULT_MARK } from './protocol.mjs';
 
 export const EXIT = Object.freeze({ pass: 0, fail: 1, error: 2, timeout: 5 });
@@ -156,8 +160,15 @@ export async function main(argv, env = process.env, deps = {}) {
         renameSync(`${f}.tmp`, f);
       } catch { /* 기록 실패는 결과를 바꾸지 않는다 */ }
     }
+    // 5. 로컬 정리(결정 8-35). train.json과 반영됨 표시를 남긴 뒤에만, 로컬 main이 트레인 결과를 품을 때만.
+    const cleanup = {};
+    const clean = deps.cleanupHandoff ?? cleanupHandoff;
+    for (const h of result.merged) {
+      if (localMain !== '같음' && localMain !== '따라감') { cleanup[h] = `그대로(로컬 main: ${localMain})`; continue; }
+      try { clean({ handoff: h, run, memo }); cleanup[h] = '정리함'; } catch (e) { cleanup[h] = `그대로(${ONE_LINE(e?.message ?? '').slice(0, 120)})`; }
+    }
     // 트레인이 통과했으면 종료 코드는 0이다(1은 "트레인 실패, main 그대로"로만 쓴다). 반영되지 않은 이슈는 rows의 보류로 보인다.
-    return out({ ci: 'pass', train: result.train, runUrl, handoffs, merged: result.merged, mainAfter: newMain, localMain, rows }, EXIT.pass);
+    return out({ ci: 'pass', train: result.train, runUrl, handoffs, merged: result.merged, mainAfter: newMain, localMain, rows, cleanup }, EXIT.pass);
   } catch (e) {
     if (e instanceof UsageError) return fail(`인자 오류: ${e.message}`);
     if (e instanceof FlowError) return fail(e.message);

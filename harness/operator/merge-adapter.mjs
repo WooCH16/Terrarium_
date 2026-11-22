@@ -12,7 +12,7 @@ import { formatLine, exitCode, STATES } from './report.mjs';
 import { assertPlain, isStopped, killTree as defaultKillTree } from './launch.mjs';
 import { makeGhDeps } from './run-operator.mjs';
 import { plainLines, parseDependsOn } from './issue-body.mjs';
-import { REPORT_HEAD, VERDICT_ALLOW, ALLOWED_COMMIT, ALLOWED_COMMIT_LINE, LABEL } from './protocol.mjs';
+import { REPORT_HEAD, VERDICT_ALLOW, VERDICT_REJECT, ALLOWED_COMMIT, ALLOWED_COMMIT_LINE, LABEL } from './protocol.mjs';
 
 export { parseDependsOn };
 
@@ -108,6 +108,25 @@ export function collectAllowed(issues, opts = {}) {
     out.push({ issue: issue.number, sha: m[1], reviewUrl, dependsOn });
   }
   return out;
+}
+
+// 결정 8-35: 허용되지 않은 이슈가 "반려됐다"는 표시(거부 판정, 미완료·거부목록·막힘 라벨)를 가졌는지. 표시가 없으면(아직 판정 전) null.
+// 판정 전 이슈를 통합 브랜치에서 빼면 그 이슈가 돌아올 길이 없다: push-branch는 반려된 이슈만 빼고 다시 만든다.
+const REJECT_LABELS = [LABEL.미완료, LABEL.거부목록, LABEL.막힘];
+export function rejectionOf(issue, opts = {}) {
+  const labels = labelNames(issue?.labels);
+  const l = REJECT_LABELS.find((x) => labels.includes(x));
+  if (l) return `상태가 ${l}`;
+  const reviewerLogin = typeof opts.reviewerLogin === 'string' && LOGIN.test(opts.reviewerLogin) ? opts.reviewerLogin.toLowerCase() : null;
+  const comments = inOrder(Array.isArray(issue?.comments) ? issue.comments : []);
+  const lead = (c) => (typeof c?.body === 'string' ? (c.body.split(/\r?\n/).find((x) => loose(x).trim() !== '') ?? '') : '');
+  let last = null;
+  for (const c of comments) {
+    if (!/^\s*#{1,6}\s*리뷰어\s*판정/.test(loose(lead(c)))) continue;
+    if (reviewerLogin !== null && String(c?.author?.login ?? '').toLowerCase() !== reviewerLogin) continue;
+    last = c;
+  }
+  return last && String(last.body).split(/\r?\n/, 1)[0].trimEnd() === VERDICT_REJECT ? '리뷰어 거부' : null;
 }
 
 // 막힌 이슈에 (연쇄로) 의존하는 이슈를 뺀다. 순환이 있어도 끝난다.
@@ -270,6 +289,18 @@ export function advanceBranch(git, memo, branch, next, old, { allowPrimary }) {
   }
 }
 
+// 결정 8-35: 다시 만든 통합 브랜치(integration/h<N>)만 앞으로가 아닌 곳으로 옮긴다(update-ref compare-and-set). 다른 모양은 거부한다.
+// 어느 작업 폴더(대상 프로젝트 체크아웃 포함)에든 그 브랜치가 열려 있으면 옮기지 않는다(그 폴더의 index가 엉킨다).
+export function replaceIntegration(git, memo, branch, next, old) {
+  if (!/^integration\/h[1-9]\d{0,8}$/.test(branch)) throw new IntegrityError('다시 만들어 옮기는 브랜치는 integration/h<N> 모양뿐입니다.');
+  if (!FULL_SHA.test(next) || !FULL_SHA.test(old)) throw new IntegrityError('옮길 커밋 해시가 40자리가 아닙니다.');
+  const ref = `refs/heads/${branch}`;
+  for (const block of git(memo, ['worktree', 'list', '--porcelain']).split(/\r?\n\r?\n/)) {
+    if (block.split(/\r?\n/).includes(`branch ${ref}`)) throw new HarnessError(`${branch} 브랜치가 작업 폴더에 체크아웃되어 있어 다시 만들지 않았습니다.`);
+  }
+  git(memo, ['update-ref', '-m', 'terrarium push-branch rebuild (8-35)', ref, next, old]);
+}
+
 function ensureNamespace(run, handoff) {
   const runReal = realpathSync.native(run);
   const wt = `${run}/worktrees`;
@@ -423,7 +454,7 @@ function makeGuard(git, ctx) {
 }
 
 // 서로를 품은 이슈를 앞서 합치도록 정렬한다(sha가 다른 항목의 조상이면 먼저). 그 밖의 순서는 유지한다.
-function orderByAncestry(git, memo, items) {
+export function orderByAncestry(git, memo, items) {
   const cache = new Map();
   const contains = (a, b) => {
     if (!a.sha || !b.sha || a.sha === b.sha) return false;
@@ -447,7 +478,7 @@ function isReservedPath(p) {
 }
 
 // prev에 sha를 합친 병합 커밋을 배관으로 만든다. 충돌이면 { conflict: true }. 결과 해시·트리·부모는 출력에서 바로 기록한다(작업 트리·HEAD를 읽지 않는다).
-function buildMerge(git, memo, prev, sha, message) {
+export function buildMerge(git, memo, prev, sha, message) {
   let out;
   try {
     out = git(memo, ['merge-tree', '--write-tree', '--no-messages', prev, sha]);

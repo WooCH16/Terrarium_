@@ -290,6 +290,14 @@ test('--base(8-31): 시작 지점 하달이 없으면 거부, 이미 반영됐�
   const empty = await dispatchOnly(f, repo, ['--issues', '47', '--base', 'h1']);
   assert.equal(empty.code, 2);
   assert.match(empty.out[0], /h1에 이슈 브랜치가 없습니다/);
+  // 머지 트레인으로 들어가 run-train이 이름 공간을 치운 하달(train.json이 남음, 결정 8-35)은 반영된 것으로 보고 main에서 시작한다
+  writeFileSync(`${f.run}/handoffs/h1/train.json`, JSON.stringify({ train: 'train/20261122-1', issues: [] }));
+  const trained = await dispatchOnly(f, repo, ['--issues', '47', '--base', 'h1']);
+  assert.equal(trained.code, 0, trained.out.join());
+  assert.equal(trained.launched[0].baseHandoff, undefined);
+  assert.deepEqual(readJson(`${f.run}/handoffs/h2/dispatch.json`).base, null);
+  rmSync(`${f.run}/handoffs/h1/train.json`);
+  rmSync(`${f.run}/handoffs/h2`, { recursive: true, force: true });
   // h1/issue-45를 main에 반영해 둔다(이 하네스의 병합 커밋 모양).
   const s45 = priorHandoff(f, 'h1', 45, 'quickstart.md');
   git(f.memo, 'merge', '-q', '--no-ff', s45, '-m', '병합: 이슈 #45', '-m', `허용된 커밋: ${s45}`);

@@ -65,7 +65,7 @@ node <harnessDir>/operator/merge-adapter-enqueue.mjs --handoff h<N>
 ## 6-1. 원격에 올리기와 CI (결정 8-32)
 
 - 이 세션은 대상 저장소 원격에 올리지 않는다(`git push`, `gh pr`, `gh workflow`는 훅이 막는다). 리뷰어 판정은 이 세션이 끝난 뒤 나오기 때문이다.
-- 허용 뒤 코디네이터가 `push-branch`로 이슈 브랜치 `h<N>/issue-<번호>`를 올리고, 하달의 이슈가 모두 허용되면 통합 브랜치 `integration/h<N>`을 올린다. 이슈 PR·하달 PR과 CI는 대상 저장소의 GitHub Actions가 한다.
+- 허용 뒤 코디네이터가 `push-branch`로 이슈 브랜치 `h<N>/issue-<번호>`를 올리고, 하달의 이슈가 모두 판정을 받으면 통합 브랜치 `integration/h<N>`을 올린다(허용과 거부가 섞였으면 `push-branch`가 허용된 이슈만으로 통합 브랜치를 다시 만든다, 결정 8-35). 이슈 PR·하달 PR과 CI는 대상 저장소의 GitHub Actions가 한다.
 - CI가 실패하면 그 이슈는 `미완료`가 되고 `## CI 결과: 실패` 댓글이 붙는다. 재작업은 새 하달로 온다. 새 하달에서 이 댓글을 보면 실패한 검사 이름을 시작 전 검토의 참고로 쓰고, 결과 보고서의 남은 문제에 "앞 하달의 CI 실패를 고친 재작업"이라고 적는다.
 
 ## 7. 돌려주는 것

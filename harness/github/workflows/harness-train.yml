@@ -4,6 +4,8 @@
 # 2. CI(시험 명령)를 한 번 돌린다.
 # 3. 통과하면 main을 트레인 끝으로 빨리감기만 하고(강제 아님) 하달 PR들을 닫는다.
 # 4. 실패하면 main은 그대로 둔다. 맨 뒤 하달부터 하나씩 빼며 다시 돌려 실패한 하달을 찾고 요약에 남긴다. 부분 머지는 하지 않는다(사용자에게 묻는다).
+# 5. (결정 8-35) main에 올린 뒤에만: 들어간 하달들의 남은 이슈 PR을 닫고 h<N>/issue-*, integration/h<N>, 이 train/… 원격 브랜치를 지운다.
+#    지우기는 safe_delete 하나로만(세 모양만, main은 절대 아님). 정리가 실패해도 결과 줄과 종료 코드는 바뀌지 않는다. 실패 길에서는 아무것도 지우지 않는다.
 # 결과는 실행 기록에 HARNESS_TRAIN_RESULT <JSON> 한 줄로도 찍는다(하네스는 gh run view --log로 읽는다. 요약은 사람이 본다).
 # main 보호 규칙이 있으면 GITHUB_TOKEN의 push가 막힐 수 있다(사전 점검이 안내한다). GitHub 머지 큐는 쓰지 않는다(결정 6).
 name: harness-train
@@ -60,6 +62,14 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           MAIN_BEFORE=$(git rev-parse HEAD)
           json_list() { if [ "$#" -eq 0 ]; then echo '[]'; else printf '%s\n' "$@" | jq -R . | jq -cs .; fi; }
+          safe_delete() {
+            local b="$1"
+            if [ "$b" = "main" ] || [[ ! "$b" =~ ^(h[1-9][0-9]{0,8}/issue-[1-9][0-9]{0,8}|integration/h[1-9][0-9]{0,8}|train/[0-9]{8}-[0-9]{1,9})$ ]]; then
+              echo "::warning::하네스 브랜치 모양이 아니어서 지우지 않는다: $b"
+              return 0
+            fi
+            gh api -X DELETE "repos/$REPO/git/refs/heads/$b" --silent || echo "::warning::$b를 지우지 못했다"
+          }
           emit() {
             echo "HARNESS_TRAIN_RESULT $1"
             { echo "## 머지 트레인 $TRAIN"; echo; echo "$2"; } >> "$GITHUB_STEP_SUMMARY"
@@ -90,6 +100,16 @@ jobs:
               if [ -n "$NUM" ]; then gh pr close "$NUM" --repo "$REPO" --comment "머지 트레인 $TRAIN으로 main에 들어갔다" || true; fi
             done
             emit "$(jq -cn --arg t "$TRAIN" --argjson m "$(json_list "${LIST[@]}")" --arg a "$AFTER" '{result:"merged",train:$t,merged:$m,failedHandoff:null,passingPrefix:$m,mainAfter:$a}')" "통과. main을 $AFTER로 빨리감기했다. 하달: $HANDOFFS"
+            for h in "${LIST[@]}"; do
+              for b in $(gh api --paginate "repos/$REPO/git/matching-refs/heads/$h/issue-" --jq '.[].ref | ltrimstr("refs/heads/")' || true); do
+                for num in $(gh pr list --repo "$REPO" --head "$b" --state open --json number --jq '.[].number' || true); do
+                  gh pr close "$num" --repo "$REPO" --comment "머지 트레인 $TRAIN으로 하달 $h가 main에 들어가 정리한다. 이 이슈가 들어가지 않았다면 새 하달로 재작업한다(결정 8-35)" || true
+                done
+                safe_delete "$b"
+              done
+              safe_delete "integration/$h"
+            done
+            safe_delete "$TRAIN"
             exit 0
           fi
           K=$((N - 1))
