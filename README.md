@@ -44,7 +44,7 @@ Terrarium은 Claude Code 에이전트를 계층으로 나눠 일을 맡기는 �
 | 진행 확인 | 메뉴 [설정 > 진행 기록](이슈·하달·판정, 읽기 전용) | GitHub 이슈와 실행 폴더의 기록 파일 |
 | 맞는 경우 | 터미널 없이 설치해서 쓸 때 | 하네스를 고치거나 시험할 때, 앱을 설치하지 않을 때 |
 
-두 버전 모두 Node 22 이상, git, [GitHub CLI](https://cli.github.com/)(`gh auth login`), [Claude Code](https://claude.com/claude-code)(로그인), Pi(`npm install -g @earendil-works/pi-coding-agent`, `pi auth login anthropic` 등)가 있어야 합니다. 지정 저장소는 비공개여야 합니다.
+두 버전 모두 Node 22 이상, git, [GitHub CLI](https://cli.github.com/)(`gh auth login`), [Claude Code](https://claude.com/claude-code)(로그인), Pi(`npm install -g @earendil-works/pi-coding-agent`, `pi auth login anthropic`, muse 워커는 `pi auth login meta`)가 있어야 합니다. 지정 저장소는 비공개여야 합니다.
 
 같은 실행 폴더를 두 버전에서 번갈아 열 수 있습니다. 터미널에서 만든 실행 폴더는 앱 설정 창 위쪽의 실행 폴더 **열기…**로 고르면 됩니다. 다만 한 실행 폴더에 코디네이터를 둘 띄우지는 마세요. 앱과 터미널에서 동시에 열면 하달이 겹칩니다.
 

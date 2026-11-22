@@ -122,7 +122,7 @@ ipcMain.handle('preflight', async (_e, { repo } = {}) => {
 });
 ipcMain.handle('keys:status', () => ({ names: KEY_NAMES, labels: KEY_LABELS, has: keys().status(), encryption: safeStorage.isEncryptionAvailable?.() }));
 ipcMain.handle('keys:set', (_e, { name, value }) => { try { keys().set(name, value); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } });
-const LOGINS = { claude: 'claude', gh: 'gh auth login', 'pi-anthropic': 'pi auth login anthropic' };
+const LOGINS = { claude: 'claude', gh: 'gh auth login', 'pi-anthropic': 'pi auth login anthropic', 'pi-meta': 'pi auth login meta' }; // pi-meta: muse 워커(meta/muse-spark-…)
 ipcMain.handle('login:open', (_e, { which }) => {
   const cmd = LOGINS[which];
   if (!cmd) return { ok: false, error: '알 수 없는 로그인입니다.' };

@@ -44,7 +44,7 @@ There are two ways to use the harness. Either way, the coordinator is the same i
 | Checking progress | [설정 > 진행 기록] (issues, handoffs, verdicts; read-only) | GitHub issues and the record files in the run folder |
 | Good for | Installing and using it without a terminal | Changing or testing the harness, or not installing the app |
 
-Both need Node 22 or later, git, [GitHub CLI](https://cli.github.com/) (`gh auth login`), [Claude Code](https://claude.com/claude-code) (logged in), and Pi (`npm install -g @earendil-works/pi-coding-agent`, then `pi auth login anthropic` or similar). The designated repository must be private.
+Both need Node 22 or later, git, [GitHub CLI](https://cli.github.com/) (`gh auth login`), [Claude Code](https://claude.com/claude-code) (logged in), and Pi (`npm install -g @earendil-works/pi-coding-agent`, then `pi auth login anthropic`, and `pi auth login meta` for the muse worker). The designated repository must be private.
 
 You can open the same run folder from either one. To open a run folder made in the terminal, use **열기…** (Open) next to the run folder picker at the top of the app's settings window. Do not run two coordinators on one run folder at once: opening it in the app and the terminal together makes handoffs collide.
 
