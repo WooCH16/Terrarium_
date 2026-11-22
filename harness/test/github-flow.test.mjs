@@ -9,7 +9,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { main as pushMain, parseArgs as pushArgs, forcePushArgs, leaseable, rebuildFile } from '../operator/push-branch.mjs';
-import { main as trainMain, parseTrainResult } from '../operator/run-train.mjs';
+import { main as trainMain, parseTrainResult, parseFailure, readRemoteCleanup, TAIL_LINES, TAIL_WIDTH } from '../operator/run-train.mjs';
 import { provenIssuesOnMain, openGit } from '../operator/merge-adapter.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url)).replace(/\\/g, '/');
@@ -232,6 +232,8 @@ test('S3: 팀 둘(dev h1 → tester h2, --base h1). 트레인이 h1 → h2 순�
   assert.deepEqual(s.issues[1].labels, ['반영됨']);
   assert.deepEqual(s.issues[2].labels, ['반영됨']);
   assert.ok(s.prs.filter((p) => p.baseRefName === 'main').every((p) => p.state === 'MERGED'));
+  // 빈 곳 2(run-19): 원격 정리를 직접 읽어 알려 준다
+  assert.deepEqual(r.json.remoteCleanup, { state: '정리됨', trainBranch: '지움', handoffs: { h1: { branchesLeft: [], openPrs: [] }, h2: { branchesLeft: [], openPrs: [] } } });
   // 트레인으로 들어간 이슈도 "main에 있음"으로 본다(의존 이슈가 대기로 남지 않게)
   const { git: g } = openGit({});
   assert.deepEqual([...provenIssuesOnMain(g, { memo: f.memo, run: f.run })].sort(), [1, 2]);
@@ -253,6 +255,9 @@ test('S6: 트레인 CI 실패(뒤 하달이 깨뜨림) → main 그대로, 실�
   assert.deepEqual(r.json.passingPrefix, ['h1']);
   assert.equal(r.json.main, '그대로');
   assert.match(r.json.reason, /사용자에게 묻는다/);
+  // 빈 곳 1(run-19): 실패 원인(단계·출력 끝)이 결과에 온다
+  assert.deepEqual(r.json.failure, { stage: 'test', handoff: null, tail: ['not ok 1 - h2 시험', '# fail 1'] });
+  assert.match(r.json.reason, /실패 단계: 시험 명령\./);
   assert.equal(git(f.remote, 'rev-parse', 'refs/heads/main'), before);
   assert.equal(git(f.memo, 'rev-parse', 'refs/heads/main'), localBefore);
   const s = f.state();
@@ -314,10 +319,68 @@ test('S8: 원격은 있어도 워크플로가 main에 없으면 로컬 흐름', 
 
 test('트레인 결과 줄 읽기: 표지 뒤 JSON, 모르는 하달·모양이 틀린 값은 버린다', () => {
   const ok = `x\ty\t2026 HARNESS_TRAIN_RESULT {"result":"failed","train":"train/20261122-3","merged":[],"failedHandoff":"h2","passingPrefix":["h1"],"mainAfter":null}`;
-  assert.deepEqual(parseTrainResult(ok, ['h1', 'h2']), { result: 'failed', train: 'train/20261122-3', merged: [], failedHandoff: 'h2', passingPrefix: ['h1'], mainAfter: null });
+  assert.deepEqual(parseTrainResult(ok, ['h1', 'h2']), { result: 'failed', train: 'train/20261122-3', merged: [], failedHandoff: 'h2', passingPrefix: ['h1'], mainAfter: null, failure: null });
   assert.equal(parseTrainResult(ok, ['h1']), null);
   assert.equal(parseTrainResult(ok.replace('train/20261122-3', 'main'), ['h1', 'h2']), null);
   assert.equal(parseTrainResult('nothing', ['h1']), null);
+});
+
+test('run-19 빈 곳 1: failure 칸 읽기. 옛 모양(칸 없음)도 결과는 읽고, 색 코드·제어 문자는 지우고 줄 수·폭을 자른다', () => {
+  const line = (o) => `x\ty\t2026 HARNESS_TRAIN_RESULT ${JSON.stringify({ result: 'failed', train: 'train/20261122-3', merged: [], failedHandoff: 'h1', passingPrefix: [], mainAfter: null, ...o })}`;
+  assert.equal(parseTrainResult(line({}), ['h1']).failure, null, '옛 워크플로');
+  assert.equal(parseTrainResult(line({ failure: 'x' }), ['h1']).result, 'failed', '틀린 failure 칸은 결과를 버리지 않는다');
+  assert.equal(parseTrainResult(line({ failure: 'x' }), ['h1']).failure, null);
+  const long = Array.from({ length: 50 }, (_, i) => `줄${i}`);
+  const f = parseTrainResult(line({ failure: { stage: 'merge', handoff: 'h1', tail: ['\u001b[31mCONFLICT\u001b[0m a.txt\r', 'x'.repeat(500), ...long] } }), ['h1']).failure;
+  assert.equal(f.stage, 'merge');
+  assert.equal(f.handoff, 'h1');
+  assert.equal(f.tail.length, TAIL_LINES);
+  assert.equal(f.tail.at(-1), '줄49');
+  assert.ok(f.tail.every((l) => l.length <= TAIL_WIDTH && !/[\u0000-\u001f]/.test(l)));
+  assert.deepEqual(parseFailure({ stage: 'rm -rf', handoff: 'h9', tail: ['a\u001b[1mb', 3] }, ['h1']), { stage: null, handoff: null, tail: ['ab'] }, '모르는 단계·하달은 버린다');
+  assert.equal(parseFailure({ stage: 'nope', tail: [] }, ['h1']), null);
+});
+
+test('run-19 빈 곳 1: 옛 워크플로(failure 칸 없음)의 실패도 그대로 보고하고 원인이 없다고 말한다', T, async () => {
+  const f = fixture({ handoffs: [{ h: 'h1', issues: [1] }] });
+  for (const b of ['h1/issue-1', 'integration/h1']) assert.equal((await push(f, b)).code, 0, b);
+  f.patch((s) => { s.trainFail = ['h1']; s.oldTrainResult = true; });
+  const r = await train(f, 'h1');
+  assert.equal(r.code, 1);
+  assert.equal(r.json.failedHandoff, 'h1');
+  assert.equal(r.json.failure, null);
+  assert.match(r.json.reason, /실패 원인은 결과 줄에 없다/);
+});
+
+test('run-19 빈 곳 2: 트레인 워크플로의 정리가 안 됐으면 남은 원격 브랜치를 보고한다(종료 코드는 0 그대로)', T, async () => {
+  const f = fixture({ handoffs: [{ h: 'h1', issues: [1] }] });
+  for (const b of ['h1/issue-1', 'integration/h1']) assert.equal((await push(f, b)).code, 0, b);
+  f.patch((s) => { s.skipTrainCleanup = true; });
+  const r = await train(f, 'h1');
+  assert.equal(r.code, 0, r.errs.join('\n'));
+  const rc = r.json.remoteCleanup;
+  assert.match(rc.state, /^남음: /);
+  assert.deepEqual(rc.handoffs.h1.branchesLeft.sort(), ['h1/issue-1', 'integration/h1']);
+  assert.equal(rc.trainBranch, '남음');
+  assert.match(rc.state, /train\/20261122-1/);
+});
+
+test('run-19 빈 곳 2: readRemoteCleanup은 열린 하달·이슈 PR을 남은 것으로 보고, 읽지 못하면 "확인 못 함"', () => {
+  const calls = [];
+  const gh = (args) => {
+    calls.push(args);
+    const head = args[args.indexOf('--head') + 1];
+    const base = args[args.indexOf('--base') + 1];
+    return head === 'h1/issue-2' ? JSON.stringify([{ number: 7, url: 'https://github.com/owner/app/pull/7', headRefName: head, baseRefName: base, state: 'OPEN', headRefOid: 'a' }]) : '[]';
+  };
+  const rgit = () => 'abc\trefs/heads/main\n';
+  const r = readRemoteCleanup({ gh, rgit, memo: '.', target: { repo: 'owner/app', remote: 'x' }, train: 'train/20261122-1', branches: { h1: ['h1/issue-2'] } });
+  assert.equal(r.state, '남음: https://github.com/owner/app/pull/7');
+  assert.deepEqual(r.handoffs.h1, { branchesLeft: [], openPrs: ['https://github.com/owner/app/pull/7'] });
+  assert.equal(r.trainBranch, '지움');
+  assert.ok(calls.every((c) => c[0] === 'pr' && c[1] === 'list'), '읽기만');
+  const bad = readRemoteCleanup({ gh, rgit: () => { throw new Error('fatal: 원격 없음'); }, memo: '.', target: { repo: 'owner/app', remote: 'x' }, train: 'train/20261122-1', branches: { h1: [] } });
+  assert.match(bad.state, /^확인 못 함\(fatal: 원격 없음\)$/);
 });
 
 // 결정 8-35 이전에는 섞인 하달을 종료 코드 2로 거부했다. 이제 판정 전 이슈가 섞인 때만 거부하고, 반려된 이슈만 빼고 다시 만든다(아래 시험들).

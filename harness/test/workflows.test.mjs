@@ -121,7 +121,7 @@ test('8-35: 지우기는 safe_delete 하나로만, 세 브랜치 모양 정규�
 
 test('8-35: 트레인은 main push 성공 뒤에만 지우고, 실패 길에는 지우기가 없다', () => {
   const t = read('harness-train.yml');
-  const mainPush = t.indexOf('if ! git push origin "$AFTER:refs/heads/main"; then');
+  const mainPush = t.indexOf('if ! git push origin "$AFTER:refs/heads/main" > "$FAIL_LOG" 2>&1; then');
   const success = t.slice(mainPush, t.indexOf('K=$((N - 1))'));
   const failure = t.slice(t.indexOf('K=$((N - 1))'));
   const head = t.slice(0, mainPush);
@@ -214,5 +214,37 @@ test('S14: run: 스크립트가 bash 문법을 통과한다(bash -n)', { skip: (
         }
       }
     }
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+// run-19 빈 곳 1: 실패 원인. 결과 줄의 failure 칸(단계·하달·출력 끝)과, 실패한 시도의 출력만 남기는 attempt.
+test('run-19: 트레인 결과 줄에 failure 칸(실패 길 셋 모두), 출력 끝 30줄·200자', () => {
+  const t = read('harness-train.yml');
+  assert.equal((t.match(/failure:\$fl\}/g) ?? []).length, 3, 'fetch·push·시험 실패 길');
+  assert.doesNotMatch(t.slice(t.indexOf('result:"merged"') - 200, t.indexOf('result:"merged"') + 200), /failure/, '통과 줄에는 없다');
+  assert.ok(t.includes('.[-30:] | map(.[0:200])'));
+  assert.match(t, /FAIL_STAGE=fetch/);
+  assert.match(t, /FAIL_STAGE=push/);
+  assert.match(t, /stage=merge; fh="\$h"/);
+  assert.match(t, /stage=install/);
+  assert.match(t, /stage=test/);
+});
+
+test('run-19: attempt를 bash로 돌리면 종료 코드는 그대로이고, 마지막으로 실패한 시도의 출력만 남는다', { skip: (!yaml || !hasBash) && 'bash나 js-yaml이 없다' }, () => {
+  const script = yaml.load(read('harness-train.yml')).jobs.train.steps.map((s) => s.run ?? '').find((r) => r.includes('attempt() {'));
+  const def = script.slice(script.indexOf('attempt() {'));
+  const fn = def.slice(0, def.indexOf('\n}\n') + 3);
+  const tmp = mkdtempSync(join(tmpdir(), 'wf-att-'));
+  try {
+    const p = join(tmp, 'a.sh');
+    // 가짜 git: merge는 늘 통과. 시험 명령은 쌓인 하달 수가 2 이상이면 실패.
+    writeFileSync(p, `set -uo pipefail\nRUNNER_TEMP="${tmp.replace(/\\/g, '/')}"\nFAIL_LOG="$RUNNER_TEMP/fail.log"; : > "$FAIL_LOG"; FAIL_STAGE=""; FAIL_HANDOFF=""\nTRAIN=train/x; MAIN_BEFORE=m; LIST=(h1 h2)\ngit() { :; }\nHARNESS_TEST_COMMAND='if [ "$COUNT" -ge 2 ]; then echo "not ok $COUNT"; exit 1; fi; echo "ok $COUNT"'\n${fn}\nexport COUNT=2; attempt 2; echo "rc2=$?"\nexport COUNT=1; attempt 1; echo "rc1=$?"\necho "stage=$FAIL_STAGE"; echo "log=$(cat "$FAIL_LOG")"\n`);
+    const r = spawnSync('bash', [p], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /rc2=1\n/);
+    assert.match(r.stdout, /rc1=0\n/);
+    assert.match(r.stdout, /stage=test\n/);
+    assert.match(r.stdout, /log=not ok 2\n/, '뒤에 통과한 시도가 덮지 않는다');
+    assert.match(r.stdout, /ok 1\n/, '출력은 실행 기록에도 찍힌다');
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });

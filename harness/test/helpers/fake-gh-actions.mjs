@@ -117,7 +117,9 @@ function closeOlder(head) {
   }
 }
 // harness-train.yml 흉내: 트레인이 main에 들어간 뒤 그 하달들의 이슈 PR을 닫고 integration/h*, h*/issue-*, train/… 브랜치를 지운다.
+// state.skipTrainCleanup: 정리 단계가 실패한 것처럼 아무것도 지우지 않는다(run-train의 remoteCleanup 시험).
 function cleanAfterTrain(handoffs, train) {
+  if (S.skipTrainCleanup) return;
   for (const h of handoffs) {
     for (const b of remoteBranches().filter((x) => x.startsWith(`${h}/issue-`))) {
       for (const p of S.prs) if (p.headRefName === b && p.state === 'OPEN') closePr(p, `머지 트레인 ${train} 뒤 정리`);
@@ -179,6 +181,8 @@ if (a0 === 'workflow' && a1 === 'run') {
       let k = handoffs.length - 1;
       for (; k > 0; k--) if (attempt(handoffs.slice(0, k)).ok) break;
       result = { result: 'failed', train, merged: [], failedHandoff: handoffs[k], passingPrefix: handoffs.slice(0, k), mainAfter: null };
+      // failure 칸(실패 단계·출력 끝). state.oldTrainResult면 옛 워크플로처럼 넣지 않는다. state.trainFailTail로 출력 끝을 정한다.
+      if (!S.oldTrainResult) result.failure = { stage: 'test', handoff: null, tail: S.trainFailTail ?? [`not ok 1 - ${handoffs[k]} 시험`, '# fail 1'] };
     }
     log.push(`train\tresult\t${T0} HARNESS_TRAIN_RESULT ${JSON.stringify(result)}`);
     S.runs.push({ databaseId: id, displayTitle: `harness-train ${fields.request}`, status: S.runStaysQueued ? 'in_progress' : 'completed', conclusion: result.result === 'merged' ? 'success' : 'failure', url: `https://github.com/${S.target ?? 'owner/app'}/actions/runs/${id}`, log: S.noResultLine ? 'nothing\n' : `${log.join('\n')}\n` });

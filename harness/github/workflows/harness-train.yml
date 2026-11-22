@@ -7,6 +7,7 @@
 # 5. (결정 8-35) main에 올린 뒤에만: 들어간 하달들의 남은 이슈 PR을 닫고 h<N>/issue-*, integration/h<N>, 이 train/… 원격 브랜치를 지운다.
 #    지우기는 safe_delete 하나로만(세 모양만, main은 절대 아님). 정리가 실패해도 결과 줄과 종료 코드는 바뀌지 않는다. 실패 길에서는 아무것도 지우지 않는다.
 # 결과는 실행 기록에 HARNESS_TRAIN_RESULT <JSON> 한 줄로도 찍는다(하네스는 gh run view --log로 읽는다. 요약은 사람이 본다).
+# 실패면 결과 줄의 failure 칸에 실패한 단계(fetch·merge·install·test·push), 그 하달, 마지막으로 실패한 시도의 출력 끝(30줄, 줄마다 200자)을 넣는다.
 # main 보호 규칙이 있으면 GITHUB_TOKEN의 push가 막힐 수 있다(사전 점검이 안내한다). GitHub 머지 큐는 쓰지 않는다(결정 6).
 name: harness-train
 run-name: harness-train ${{ inputs.request }}
@@ -70,29 +71,44 @@ jobs:
             fi
             gh api -X DELETE "repos/$REPO/git/refs/heads/$b" --silent || echo "::warning::$b를 지우지 못했다"
           }
+          FAIL_LOG="$RUNNER_TEMP/harness-fail.log"
+          : > "$FAIL_LOG"
+          FAIL_STAGE=""
+          FAIL_HANDOFF=""
+          # 실패한 시도의 출력만 남긴다(뒤에 통과한 시도가 덮지 않게). 하네스가 실패 원인으로 읽는다.
+          failure_json() {
+            jq -cn --arg s "$FAIL_STAGE" --arg h "$FAIL_HANDOFF" --rawfile l "$FAIL_LOG" '{stage:$s,handoff:(if $h == "" then null else $h end),tail:($l | split("\n") | map(select(length > 0)) | .[-30:] | map(.[0:200]))}'
+          }
           emit() {
             echo "HARNESS_TRAIN_RESULT $1"
             { echo "## 머지 트레인 $TRAIN"; echo; echo "$2"; } >> "$GITHUB_STEP_SUMMARY"
           }
           for h in "${LIST[@]}"; do
-            if ! git fetch --no-tags origin "refs/heads/integration/$h:refs/remotes/origin/integration/$h"; then
-              emit "$(jq -cn --arg t "$TRAIN" --arg f "$h" '{result:"failed",train:$t,merged:[],failedHandoff:$f,passingPrefix:[],mainAfter:null}')" "integration/$h를 읽지 못했다. main은 그대로다."
+            if ! git fetch --no-tags origin "refs/heads/integration/$h:refs/remotes/origin/integration/$h" > "$FAIL_LOG" 2>&1; then
+              cat "$FAIL_LOG"; FAIL_STAGE=fetch; FAIL_HANDOFF="$h"
+              emit "$(jq -cn --arg t "$TRAIN" --arg f "$h" --argjson fl "$(failure_json)" '{result:"failed",train:$t,merged:[],failedHandoff:$f,passingPrefix:[],mainAfter:null,failure:$fl}')" "integration/$h를 읽지 못했다. main은 그대로다."
               exit 1
             fi
           done
+          # 종료 코드는 그대로 돌려준다(출력은 파일로 받고 실행 기록에도 찍는다. 파이프를 쓰지 않는다).
           attempt() {
+            local out="$RUNNER_TEMP/harness-attempt.log" stage="" fh="" rc=0
+            : > "$out"
             git checkout -q -B "$TRAIN" "$MAIN_BEFORE"
             for h in "${LIST[@]:0:$1}"; do
-              if ! git merge -q --no-ff "origin/integration/$h" -m "트레인: $h"; then git merge --abort; return 1; fi
+              if ! git merge -q --no-ff "origin/integration/$h" -m "트레인: $h" > "$out" 2>&1; then cat "$out"; git merge --abort; stage=merge; fh="$h"; rc=1; break; fi
             done
-            if [ -f package-lock.json ]; then npm ci || return 1; fi
-            bash -c "$HARNESS_TEST_COMMAND"
+            if [ "$rc" -eq 0 ] && [ -f package-lock.json ]; then npm ci > "$out" 2>&1; rc=$?; cat "$out"; if [ "$rc" -ne 0 ]; then stage=install; fi; fi
+            if [ "$rc" -eq 0 ]; then bash -c "$HARNESS_TEST_COMMAND" > "$out" 2>&1; rc=$?; cat "$out"; if [ "$rc" -ne 0 ]; then stage=test; fi; fi
+            if [ "$rc" -ne 0 ]; then FAIL_STAGE="$stage"; FAIL_HANDOFF="$fh"; cp "$out" "$FAIL_LOG"; fi
+            return "$rc"
           }
           if attempt "$N"; then
             AFTER=$(git rev-parse HEAD)
             git push origin "$AFTER:refs/heads/$TRAIN" || exit 1
-            if ! git push origin "$AFTER:refs/heads/main"; then
-              emit "$(jq -cn --arg t "$TRAIN" '{result:"failed",train:$t,merged:[],failedHandoff:null,passingPrefix:[],mainAfter:null}')" "CI는 통과했지만 main에 올리지 못했다(main이 그사이 바뀌었거나 보호 규칙). main은 그대로다."
+            if ! git push origin "$AFTER:refs/heads/main" > "$FAIL_LOG" 2>&1; then
+              cat "$FAIL_LOG"; FAIL_STAGE=push; FAIL_HANDOFF=""
+              emit "$(jq -cn --arg t "$TRAIN" --argjson fl "$(failure_json)" '{result:"failed",train:$t,merged:[],failedHandoff:null,passingPrefix:[],mainAfter:null,failure:$fl}')" "CI는 통과했지만 main에 올리지 못했다(main이 그사이 바뀌었거나 보호 규칙). main은 그대로다."
               exit 1
             fi
             for h in "${LIST[@]}"; do
@@ -119,5 +135,5 @@ jobs:
           done
           FAILED="${LIST[$K]}"
           PREFIX=("${LIST[@]:0:$K}")
-          emit "$(jq -cn --arg t "$TRAIN" --arg f "$FAILED" --argjson p "$(json_list "${PREFIX[@]}")" '{result:"failed",train:$t,merged:[],failedHandoff:$f,passingPrefix:$p,mainAfter:null}')" "실패. main은 그대로다. 실패한 하달: $FAILED. 통과한 앞부분: ${PREFIX[*]:-없음}. 부분 머지는 하지 않았다(사용자가 정한다)."
+          emit "$(jq -cn --arg t "$TRAIN" --arg f "$FAILED" --argjson p "$(json_list "${PREFIX[@]}")" --argjson fl "$(failure_json)" '{result:"failed",train:$t,merged:[],failedHandoff:$f,passingPrefix:$p,mainAfter:null,failure:$fl}')" "실패. main은 그대로다. 실패한 하달: $FAILED(단계: ${FAIL_STAGE:-?}). 통과한 앞부분: ${PREFIX[*]:-없음}. 부분 머지는 하지 않았다(사용자가 정한다)."
           exit 1

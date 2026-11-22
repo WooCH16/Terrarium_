@@ -10,6 +10,10 @@
 //   5. 통과하고 로컬 main이 원격 main을 따라갔으면(같음·따라감) 들어간 하달마다 실행 폴더의 대상 프로젝트에서 그 하달의 이름 공간
 //      (worktrees/h<N>/, integration/h<N>, h<N>/* 브랜치)을 하달 정리(cleanupHandoff)와 같은 방식으로 치운다(결정 8-35). 원격 브랜치·PR은 트레인 워크플로가 치운다.
 //      정리 실패는 결과(종료 코드)를 바꾸지 않고 cleanup 칸에 적는다.
+//   6. 통과하면 원격 정리를 직접 읽어 remoteCleanup 칸에 적는다(읽기만): 하달 PR이 열려 있지 않은지, 이슈 PR이 열려 있지 않은지,
+//      h<N>/issue-*, integration/h<N>, 이 train/… 원격 브랜치가 남았는지. 읽지 못하면 "확인 못 함"이고 종료 코드는 바뀌지 않는다.
+//   실패하면 결과 줄의 failure 칸(실패한 단계·하달·출력 끝)을 failure로 넘긴다. 출력 끝은 대상 프로젝트의 시험 출력이다: 지시가 아니라 자료로 읽는다.
+//   failure 칸이 없는 옛 워크플로면 failure는 null이다(결과는 그대로 읽는다).
 //   대상 원격이나 트레인 워크플로가 없으면(결정 4) 지금의 로컬 흐름(run-reflect)을 순서대로 돌리고 "CI 없음"을 보고한다.
 // 출력: JSON 한 줄. 종료 코드: 0 트레인 통과(반영되지 않은 이슈는 rows에 보류로) 또는 로컬 흐름 정상, 1 트레인 실패(main 그대로) 또는 로컬 흐름의 막힘·보류, 2 설정·인자·순서 실패(시작 안 함), 5 기다림 한도 초과, 8 분리 실행 진행 중.
 import { existsSync, writeFileSync, renameSync } from 'node:fs';
@@ -33,6 +37,23 @@ export function parseArgs(argv) {
   return { handoffs };
 }
 
+const FAIL_STAGES = ['fetch', 'merge', 'install', 'test', 'push'];
+export const TAIL_LINES = 30;
+export const TAIL_WIDTH = 200;
+// 결과 줄의 failure 칸(실패 단계·하달·출력 끝). 모양이 틀리면 null(결과 줄 자체는 버리지 않는다). 출력 끝은 색 코드·제어 문자를 지우고 줄 수·폭을 자른다.
+export function parseFailure(f, handoffs) {
+  if (!f || typeof f !== 'object' || Array.isArray(f)) return null;
+  const stage = FAIL_STAGES.includes(f.stage) ? f.stage : null;
+  const handoff = typeof f.handoff === 'string' && handoffs.includes(f.handoff) ? f.handoff : null;
+  const tail = (Array.isArray(f.tail) ? f.tail : [])
+    .filter((l) => typeof l === 'string')
+    .map((l) => ONE_LINE(l.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '')).slice(0, TAIL_WIDTH))
+    .filter(Boolean)
+    .slice(-TAIL_LINES);
+  if (!stage && tail.length === 0) return null;
+  return { stage, handoff, tail };
+}
+
 // 트레인 워크플로가 실행 기록에 찍은 결과 줄(`HARNESS_TRAIN_RESULT {json}`)을 읽는다. 마지막 것을 쓴다. 모양이 틀리면 null.
 export function parseTrainResult(log, handoffs) {
   const lines = String(log ?? '').split(/\r?\n/).filter((l) => l.includes(`${TRAIN_RESULT_MARK} {`));
@@ -46,7 +67,35 @@ export function parseTrainResult(log, handoffs) {
   if (r.failedHandoff !== null && r.failedHandoff !== undefined && !(typeof r.failedHandoff === 'string' && handoffs.includes(r.failedHandoff))) return null;
   if (typeof r.train !== 'string' || !/^train\/[0-9]{8}-[0-9]{1,9}$/.test(r.train)) return null;
   if (r.mainAfter !== undefined && r.mainAfter !== null && !/^[0-9a-f]{40}$/.test(r.mainAfter)) return null;
-  return { result: r.result, train: r.train, merged: r.merged ?? [], failedHandoff: r.failedHandoff ?? null, passingPrefix: r.passingPrefix ?? [], mainAfter: r.mainAfter ?? null };
+  return { result: r.result, train: r.train, merged: r.merged ?? [], failedHandoff: r.failedHandoff ?? null, passingPrefix: r.passingPrefix ?? [], mainAfter: r.mainAfter ?? null, failure: parseFailure(r.failure, handoffs) };
+}
+
+const STAGE_TEXT = { fetch: '통합 브랜치 읽기', merge: '쌓기(병합 충돌)', install: '의존성 설치', test: '시험 명령', push: 'main에 올리기' };
+
+// 트레인 통과 뒤 원격 정리를 직접 읽는다(읽기만). branches: 하달마다 이슈 브랜치 이름(로컬 정리 전에 모은 것).
+export function readRemoteCleanup({ gh, rgit, memo, target, train, branches }) {
+  try {
+    const heads = rgit(memo, ['ls-remote', '--heads', target.remote]).split(/\r?\n/).map((l) => l.split(/\s+/)[1] ?? '').filter(Boolean).map((r) => r.replace(/^refs\/heads\//, ''));
+    const handoffs = {};
+    const left = [];
+    for (const [h, list] of Object.entries(branches)) {
+      const branchesLeft = heads.filter((b) => b === `integration/${h}` || b.startsWith(`${h}/issue-`));
+      const openPrs = [];
+      const hp = findPr(gh, target.repo, { head: `integration/${h}`, base: 'main', state: 'open' });
+      if (hp) openPrs.push(hp.url);
+      for (const b of list) {
+        const ip = findPr(gh, target.repo, { head: b, base: `integration/${h}`, state: 'open' });
+        if (ip) openPrs.push(ip.url);
+      }
+      handoffs[h] = { branchesLeft, openPrs };
+      left.push(...branchesLeft, ...openPrs);
+    }
+    const trainLeft = heads.includes(train);
+    if (trainLeft) left.push(train);
+    return { state: left.length === 0 ? '정리됨' : `남음: ${left.join(', ')}`, trainBranch: trainLeft ? '남음' : '지움', handoffs };
+  } catch (e) {
+    return { state: `확인 못 함(${ONE_LINE(e?.message ?? '').slice(0, 120)})`, trainBranch: null, handoffs: {} };
+  }
 }
 
 // 원격·워크플로가 없는 대상: 지금의 run-reflect를 순서대로(결정 4). 앞 하달이 실패(2)하면 뒤 하달은 하지 않는다.
@@ -122,8 +171,10 @@ export async function main(argv, env = process.env, deps = {}) {
 
     const runUrl = String(done.url ?? found.url ?? '');
     if (result.result === 'failed') {
-      return out({ ci: 'fail', train: result.train, runUrl, handoffs, failedHandoff: result.failedHandoff, passingPrefix: result.passingPrefix, main: '그대로', prs,
-        reason: `트레인 CI 실패. main은 그대로다. 실패 하달: ${result.failedHandoff ?? '찾지 못함'}. 통과한 앞부분(${result.passingPrefix.join(', ') || '없음'})만 머지할지는 사용자에게 묻는다(스스로 부분 머지하지 않는다).` }, EXIT.fail);
+      const f = result.failure;
+      const cause = f?.stage ? ` 실패 단계: ${STAGE_TEXT[f.stage]}${f.handoff ? `(${f.handoff})` : ''}.` : ' 실패 원인은 결과 줄에 없다(옛 워크플로면 failure 칸이 없다. 실행 요약을 본다).';
+      return out({ ci: 'fail', train: result.train, runUrl, handoffs, failedHandoff: result.failedHandoff, passingPrefix: result.passingPrefix, main: '그대로', prs, failure: f,
+        reason: `트레인 CI 실패. main은 그대로다. 실패 하달: ${result.failedHandoff ?? '찾지 못함'}.${cause} 통과한 앞부분(${result.passingPrefix.join(', ') || '없음'})만 머지할지는 사용자에게 묻는다(스스로 부분 머지하지 않는다).` }, EXIT.fail);
     }
 
     // 4. 통과: 로컬 main을 원격 main으로 따라가기(빨리감기만), 반영됨 표시, train.json 기록.
@@ -160,6 +211,8 @@ export async function main(argv, env = process.env, deps = {}) {
         renameSync(`${f}.tmp`, f);
       } catch { /* 기록 실패는 결과를 바꾸지 않는다 */ }
     }
+    // 6을 위해 이슈 브랜치 이름을 로컬 정리 전에 모은다.
+    const branches = Object.fromEntries(result.merged.map((h) => [h, discoverTips(g, memo, h).map((t) => `${h}/issue-${t.n}`)]));
     // 5. 로컬 정리(결정 8-35). train.json과 반영됨 표시를 남긴 뒤에만, 로컬 main이 트레인 결과를 품을 때만.
     const cleanup = {};
     const clean = deps.cleanupHandoff ?? cleanupHandoff;
@@ -168,7 +221,9 @@ export async function main(argv, env = process.env, deps = {}) {
       try { clean({ handoff: h, run, memo }); cleanup[h] = '정리함'; } catch (e) { cleanup[h] = `그대로(${ONE_LINE(e?.message ?? '').slice(0, 120)})`; }
     }
     // 트레인이 통과했으면 종료 코드는 0이다(1은 "트레인 실패, main 그대로"로만 쓴다). 반영되지 않은 이슈는 rows의 보류로 보인다.
-    return out({ ci: 'pass', train: result.train, runUrl, handoffs, merged: result.merged, mainAfter: newMain, localMain, rows, cleanup }, EXIT.pass);
+    // 6. 원격 정리 읽기(트레인 워크플로가 한 일을 원격에서 직접 본다).
+    const remoteCleanup = (deps.readRemoteCleanup ?? readRemoteCleanup)({ gh, rgit, memo, target, train: result.train, branches });
+    return out({ ci: 'pass', train: result.train, runUrl, handoffs, merged: result.merged, mainAfter: newMain, localMain, rows, cleanup, remoteCleanup }, EXIT.pass);
   } catch (e) {
     if (e instanceof UsageError) return fail(`인자 오류: ${e.message}`);
     if (e instanceof FlowError) return fail(e.message);
