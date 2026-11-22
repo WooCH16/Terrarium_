@@ -51,14 +51,15 @@ function fail(reason) {
 }
 
 const ROLES = new Set(['operator-work', 'operator-research', 'operator-reflect', 'worker']);
-const ROLE_ARGS = ['--role', '--handoff', '--issue', '--worktree'];
+const ROLE_ARGS = ['--role', '--handoff', '--issue', '--worktree', '--base-handoff'];
 
-// --role/--handoff/--issue/--worktree를 검사해 config에 합칠 값을 만든다. 잘못되면 { error }.
+// --role/--handoff/--issue/--worktree/--base-handoff를 검사해 config에 합칠 값을 만든다. 잘못되면 { error }.
+// --base-handoff는 시작 지점 하달(결정 8-31): 작업 모드 오퍼레이터가 그 하달의 이슈 브랜치를 run-worker --base로 넘길 수 있다.
 // 인자가 주어지면 설정 파일 안의 role·handoff·issue·worktree는 쓰지 않는다(인자만 믿는다). 인자가 없을 때만 설정 파일 그대로다.
 function roleOverrides() {
   const argv = process.argv.slice(2);
   // 철자가 비슷한 인자(--role=x, --ROLE, -role)는 조용히 무시되어 코디네이터가 되므로 닫힌 실패로 거부한다.
-  const lookalike = argv.find((t) => /^-{1,2}(role|handoff|issue|worktree)/i.test(t) && !ROLE_ARGS.includes(t));
+  const lookalike = argv.find((t) => /^-{1,2}(role|handoff|issue|worktree|base)/i.test(t) && !ROLE_ARGS.includes(t));
   if (lookalike !== undefined) return { error: `알 수 없는 역할 인자 모양(${lookalike}). --role <값>처럼 정확한 플래그와 별도 값으로만 준다` };
   const dup = ROLE_ARGS.find((n) => argv.filter((t) => t === n).length > 1);
   if (dup) return { error: `${dup} 인자가 두 번 이상 있다` };
@@ -67,7 +68,7 @@ function roleOverrides() {
     if (process.env.HARNESS_REQUIRE_ROLE === '1') return { error: 'HARNESS_REQUIRE_ROLE=1인 세션에 --role 인자가 없어 코디네이터로 열 수 없다' };
     return {};
   }
-  const [role, handoff, issue, worktree] = ROLE_ARGS.map(arg);
+  const [role, handoff, issue, worktree, baseHandoff] = ROLE_ARGS.map(arg);
   if (!process.argv.includes('--role') || role === undefined) return { error: '--role 없이 --handoff·--issue·--worktree만 줄 수 없고, --role에는 값이 필요하다' };
   if (!ROLES.has(role)) return { error: `알 수 없는 --role 값(${role})` };
   if (handoff === undefined || !/^h[1-9]\d*$/.test(handoff)) return { error: '--handoff가 없거나 h<번호> 모양이 아니다' };
@@ -75,7 +76,11 @@ function roleOverrides() {
   if (role === 'operator-research' && issue === undefined) return { error: 'operator-research에는 --issue(조사 이슈 번호)가 필요하다' };
   if (process.argv.includes('--worktree') && !(worktree !== undefined && /^([a-zA-Z]:[\\/]|\/)/.test(worktree) && !/^[\\/]{2}/.test(worktree))) return { error: '--worktree는 절대 경로여야 한다' };
   if (role === 'worker' && worktree === undefined) return { error: 'worker에는 --worktree(절대 경로)가 필요하다' };
+  if (process.argv.includes('--base-handoff') && !(role === 'operator-work' && baseHandoff !== undefined && /^h[1-9]\d*$/.test(baseHandoff) && baseHandoff !== handoff)) {
+    return { error: '--base-handoff는 operator-work에만, 자기 하달이 아닌 h<번호>로 준다' };
+  }
   const o = { role, handoff };
+  if (baseHandoff !== undefined) o.baseHandoff = baseHandoff;
   if (issue !== undefined) o.issue = Number(issue);
   if (worktree !== undefined) o.worktree = worktree;
   return { o };
@@ -100,7 +105,7 @@ function writeLog(file, input, result) {
 try {
   const fileConfig = JSON.parse(readFileSync(arg('--config'), 'utf8'));
   const input = JSON.parse(readFileSync(0, 'utf8'));
-  const { role: _r, handoff: _h, issue: _i, worktree: _w, ...base } = fileConfig;
+  const { role: _r, handoff: _h, issue: _i, worktree: _w, baseHandoff: _b, ...base } = fileConfig;
   const ov = roleOverrides();
   const defaultLog = join(fileConfig.runDir, 'guard.log');
   if (ov.error) {

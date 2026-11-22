@@ -4,7 +4,7 @@
 // 지정 모델을 쓸 수 없으면(허용 목록 밖, CLI 없음) operator.config.json의 fallback을 순환한다. publicOnly 모델(muse)은 이슈 본문에 `공개 가능: 예`가 있을 때만 대체로 쓴다.
 // 그 때문에 쓸 모델이 남지 않으면 status 막힘(종료 코드 1), 아예 쓸 모델이 없으면 종료 코드 2다. 러너를 띄우지 못한 경우(실행 실패)는 대체하지 않고 종료 코드 2다.
 // 종료 코드: 0 성공, 1 막힘(모든 시도 실패), 2 설정·인자·모델·저장소 실패, 3 중단(stop-operator의 표시).
-import { readFileSync, writeFileSync, mkdirSync, existsSync, lstatSync, statSync, realpathSync, renameSync, rmSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, lstatSync, statSync, realpathSync, renameSync, rmSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { delimiter, resolve as resolvePath, isAbsolute } from 'node:path';
 import { spawn as nodeSpawn, execFileSync } from 'node:child_process';
@@ -133,6 +133,13 @@ function releasePid(file, pid, now) {
       return next;
     }, (d) => !d?.pids?.includes(pid));
   } catch { /* 기록 실패는 결과를 바꾸지 않는다 */ }
+}
+
+// ---- 워커 기록(결정 8-29): handoffs/h<N>/workers.jsonl에 워커 호출마다 start·end 한 줄씩 덧붙인다. 관제탑 상세 창이 읽는다. ----
+// handoffs/ 아래라 오퍼레이터·코디네이터 훅이 쓰기를 막는다. 쓰기 실패는 워커 결과를 바꾸지 않는다.
+export const workersFile = (run, handoff) => `${run}/handoffs/${handoff}/workers.jsonl`;
+function logWorker(run, handoff, entry, now) {
+  try { appendFileSync(workersFile(run, handoff), `${JSON.stringify({ ...entry, time: now().toISOString() })}\n`); } catch { /* 기록 실패는 결과를 바꾸지 않는다 */ }
 }
 
 // ---- 워크트리 ----
@@ -311,8 +318,10 @@ function runRunner({ bin, args, cwd, env, prompt, timeoutMs, stallMs = 0, spawn,
 export async function main(argv, env = process.env, deps = {}) {
   const write = deps.write ?? ((line) => console.log(line));
   const writeErr = deps.writeErr ?? ((line) => console.error(line));
+  let logEnd = null; // 워커 기록에 start를 쓴 뒤에만: 실패로 끝나도 end 한 줄을 남긴다
   const fail = (reason) => {
     if (undo) { try { undo(); } catch { /* 지우지 못해도 오류 보고는 한다 */ } undo = null; }
+    if (logEnd) { logEnd({ status: '실패' }); logEnd = null; }
     writeErr(`오류: ${ONE_LINE(reason)}`);
     return 2;
   };
@@ -356,6 +365,8 @@ export async function main(argv, env = process.env, deps = {}) {
       if (!(e instanceof ModelBlockedError)) throw e;
       // 쓸 모델이 공개 가능 표시 때문에 남지 않았다: 설정 오류가 아니라 이 이슈의 막힘이다. 워크트리를 만들지 않는다.
       write(JSON.stringify({ handoff, issue, requestedModel: requested, model: null, status: '막힘', attempts: 0, failures: [ONE_LINE(e.message)], mainBefore, mainAfter: mainBefore, commit: null }));
+      // 워크트리도 러너도 없었으므로 end만 남긴다(관제탑은 start가 있는 이슈만 워커로 센다).
+      logWorker(run, handoff, { event: 'end', issue, status: '막힘', attempts: 0, model: null }, now);
       return 1;
     }
     // 워크트리 만들기 전에 러너 명령·설정·exclude 파일을 모두 검증해 만든다(검증 실패로 워크트리를 남기지 않는다).
@@ -449,6 +460,9 @@ export async function main(argv, env = process.env, deps = {}) {
     const stalledModels = new Set();
     let targetChanged = false;
     let breach = null;
+    // 러너를 띄우기 직전에 start 한 줄. base·baseCommit은 반영 순서 검사(결정 8-31)가 쓴다.
+    logWorker(run, handoff, { event: 'start', issue, requestedModel: requested, model: P.model, base, baseCommit }, now);
+    logEnd = (extra) => logWorker(run, handoff, { event: 'end', issue, attempts, model: P.model, ...extra }, now);
     while (attempts < attemptsMax && !ok && breach === null) {
       if (isStopped(run, handoff)) return stopped;
       attempts++;
@@ -514,6 +528,8 @@ export async function main(argv, env = process.env, deps = {}) {
     let commit = null;
     if (ok) { try { commit = git(memo, ['rev-parse', '--verify', `refs/heads/${names.issueBranch}`]).trim(); } catch { /* 기록하지 못한 값은 null */ } }
     write(JSON.stringify(result({ status: ok ? '완료' : '막힘', attempts, failures, mainBefore, mainAfter, commit, actualModel: observed.model, modelTrace: observed.trace, ...(breach ? { outsideChanges: breach } : {}), ...(targetChanged ? { targetProjectChanged: true } : {}) })));
+    logEnd({ status: ok ? '완료' : '막힘', actualModel: observed.model });
+    logEnd = null;
     return ok ? 0 : 1;
   } catch (e) {
     if (e instanceof UsageError) return fail(`인자 오류: ${e.message}`);

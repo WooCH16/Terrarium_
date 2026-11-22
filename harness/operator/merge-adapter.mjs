@@ -919,6 +919,38 @@ export function provenIssuesOnMain(git, ctx) {
   return proven;
 }
 
+// 반영 순서(결정 8-31): 다른 하달(시작 지점, --base)의 결과 위에서 시작한 하달은 그 하달이 먼저 main에 들어가야 한다.
+// 뒤 하달만 반영하면 앞 하달의 커밋이 의존 선언과 상관없이 범위(sha ^main)에 섞여 들어간다(병합 커밋이 없어 아래 무결성 검사로는 걸리지 않는다).
+// 기준은 git 조상 관계다(의존 글·라벨이 아님):
+//   (가) dispatch.json의 base 하달의 이슈 브랜치 끝 가운데 이 하달의 브랜치가 품고 있고 main에 없는 것이 있으면 거부.
+//       base 하달 전체가 아니라 품은 끝만 본다(그 하달의 다른 이슈가 끝내 거부돼도 이 하달이 막히지 않게).
+//   (나) workers.jsonl의 시작 기록에서 다른 하달의 브랜치에서 시작한 워커의 시작 커밋이 main에 없고 그 이슈 브랜치가 아직 품고 있으면 거부
+//       (base 하달이 중단·정리돼 브랜치가 사라진 경우).
+// 함께 반영하는 길은 두지 않는다. 문제가 없으면 null.
+export function baseOrderProblem(git, memo, run, handoff, tips) {
+  const onMain = (sha) => isAnc(git, memo, sha, 'refs/heads/main');
+  const embeds = (sha) => tips.some((t) => isAnc(git, memo, sha, t.sha));
+  let base = null;
+  try {
+    const d = JSON.parse(readFileSync(`${run}/handoffs/${handoff}/dispatch.json`, 'utf8'));
+    if (typeof d?.base === 'string' && HANDOFF.test(d.base) && d.base !== handoff) base = d.base;
+  } catch { /* 기록이 없으면 (나)만 본다 */ }
+  const refuse = (h, n) => `${handoff}은 ${h}의 결과${n ? `(#${n})` : ''} 위에서 시작했고 그 결과가 아직 main에 없습니다. ${h}부터 반영하세요. 아무것도 합치지 않았습니다.`;
+  if (base) {
+    for (const t of discoverTips(git, memo, base)) if (!onMain(t.sha) && embeds(t.sha)) return refuse(base, t.n);
+  }
+  let lines = [];
+  try { lines = readFileSync(`${run}/handoffs/${handoff}/workers.jsonl`, 'utf8').split(/\r?\n/).filter(Boolean); } catch { /* 없음 */ }
+  for (const line of lines) {
+    let e;
+    try { e = JSON.parse(line); } catch { continue; }
+    const m = /^(h[1-9]\d{0,8})\/issue-[1-9]\d{0,8}$/.exec(e?.base ?? '');
+    if (e?.event !== 'start' || !m || m[1] === handoff || !FULL_SHA.test(e.baseCommit ?? '')) continue;
+    if (!onMain(e.baseCommit) && embeds(e.baseCommit)) return refuse(m[1], null);
+  }
+  return null;
+}
+
 async function runLand({ run, config, cfg, handoff, env, deps }) {
   const ctx = baseCtx({ run, config, cfg, handoff, deps });
   const { fetchIssueData, setState } = makeDeps(env, config, deps);
@@ -929,6 +961,8 @@ async function runLand({ run, config, cfg, handoff, env, deps }) {
   try {
     tips = discoverTips(session.git, ctx.memo, handoff);
     others = otherHandoffs(session.git, ctx.memo, handoff);
+    const order = baseOrderProblem(session.git, ctx.memo, run, handoff, tips);
+    if (order) throw new HarnessError(order);
   } finally { session.close(); }
   const numbers = tips.map((t) => t.n);
   if (numbers.length === 0) throw new HarnessError('이 하달의 이슈 브랜치가 없습니다.');

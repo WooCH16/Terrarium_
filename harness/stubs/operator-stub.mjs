@@ -2,7 +2,7 @@
 // 세션도 워커도 띄우지 않고 GitHub에도 쓰지 않는다. 댓글은 파일로만 남긴다(코디네이터 시험용).
 //
 // 사용법: node operator-stub.mjs <run-operator|run-research|run-reflect|stop-operator> <실제 스크립트와 같은 인자>
-//   run-operator --issues <n,n,...> [--handoff h<N>]
+//   run-operator --issues <n,n,...> [--base h<N>] [--handoff h<N>]
 //   run-research --issue <n>
 //   run-reflect  --handoff h<N>
 //   stop-operator --handoff h<N>
@@ -29,7 +29,7 @@ const fwd = (p) => String(p).replace(/\\/g, '/').replace(/\/+$/, '');
 
 class StubError extends Error {}
 
-const ALLOWED = { 'run-operator': ['--issues', '--handoff'], 'run-research': ['--issue'], 'run-reflect': ['--handoff'], 'stop-operator': ['--handoff'] };
+const ALLOWED = { 'run-operator': ['--issues', '--handoff', '--base'], 'run-research': ['--issue'], 'run-reflect': ['--handoff'], 'stop-operator': ['--handoff'] };
 const REQUIRED = { 'run-operator': ['--issues'], 'run-research': ['--issue'], 'run-reflect': ['--handoff'], 'stop-operator': ['--handoff'] };
 
 function parseArgs(command, argv) {
@@ -45,6 +45,8 @@ function parseArgs(command, argv) {
   for (const f of REQUIRED[command]) if (!(f in pairs)) usage(`${f}가 필요합니다`);
   if ('--handoff' in pairs && !/^h[1-9]\d{0,8}$/.test(pairs['--handoff'])) usage('--handoff는 h<번호> 모양이어야 합니다');
   if ('--issue' in pairs && !/^[1-9]\d{0,8}$/.test(pairs['--issue'])) usage('--issue는 양의 정수여야 합니다');
+  if ('--base' in pairs && !/^h[1-9]\d{0,8}$/.test(pairs['--base'])) usage('--base는 h<번호> 모양이어야 합니다');
+  if ('--base' in pairs && '--handoff' in pairs) usage('--base는 새 하달에만 쓸 수 있습니다');
   let issues = [];
   if ('--issues' in pairs) {
     if (!/^[1-9]\d{0,8}(,[1-9]\d{0,8})*$/.test(pairs['--issues'])) usage('--issues는 쉼표로 나눈 양의 정수여야 합니다');

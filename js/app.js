@@ -18,7 +18,7 @@
   };
 
   const state = {mode: 'matrix', view: 'main', teamId: null, ops: [], op: null, sum: null, msgs: null};
-  // 카드 이름: 데이터에 이름이 있으면 그것(앱에서는 '하달 h3' 같은 실제 이름), 없으면 팀 이름
+  // 카드 이름: 데이터에 이름이 있으면 그것, 없으면 팀 이름(앱의 실제 상태는 이름을 넣지 않아 늘 팀 이름이다, 결정 8-29)
   const nameOf = (id) => { const o = state.ops.find((x) => x.id === id); return (o && o.name) || NAMES[id]; };
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));

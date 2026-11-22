@@ -134,10 +134,19 @@ function loadHarness(run, deps) {
 const gitIn = (deps, cwd) => deps.git ?? ((args) => execFileSync('git', ['-C', cwd, '-c', 'core.fsmonitor=false', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
 
 // 보고서 커밋에 그 파일이 있는가. 작업 폴더가 git 저장소가 아니거나 커밋이 없으면 null(검사에서 뺀다).
-function fileCheckerAt(git, hash) {
+// byName(name): 커밋 안에 그 이름(마지막 조각)의 파일이 있는가(빗금 없는 근거 이름, 결정 8-30). 파일 목록은 한 번만 읽는다. 읽지 못하면 false(검사에서 뺀다).
+export function fileCheckerAt(git, hash) {
   if (!hash) return null;
   try { git(['cat-file', '-e', `${hash}^{commit}`]); } catch { return null; }
-  return (p) => { try { git(['cat-file', '-e', `${hash}:${p}`]); return true; } catch { return false; } };
+  const exists = (p) => { try { git(['cat-file', '-e', `${hash}:${p}`]); return true; } catch { return false; } };
+  let names = null;
+  exists.byName = (name) => {
+    if (names === null) {
+      try { names = new Set(String(git(['ls-tree', '-r', '--name-only', '-z', hash])).split('\0').filter(Boolean).map((f) => f.slice(f.lastIndexOf('/') + 1))); } catch { names = new Set(); }
+    }
+    return names.has(name);
+  };
+  return exists;
 }
 
 // 실행 기록(advice-log.jsonl)을 읽는다. 깨진 줄이 있으면 한도를 셀 수 없으므로 오류로 멈춘다.

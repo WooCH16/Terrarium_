@@ -16,6 +16,7 @@ const testDir = join(root, 'harness', 'test');
 export const SLOW = [
   'operator-merge.test.mjs', 'operator-launch.test.mjs', 'operator-worker.test.mjs', 'operator-smoke.test.mjs',
   'run-worker.test.mjs', 'operator-rework.test.mjs', 'setup.test.mjs', 'guard.test.mjs',
+  'roles-base.test.mjs',
 ];
 
 export function pick(mode, files) {

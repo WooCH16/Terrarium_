@@ -13,6 +13,9 @@
 | `list --sort created`가 만든 시각 순으로 출력한다 | 같은 시험의 created 정렬 사례 |
 | 옵션이 없으면 출력 순서가 바뀌지 않는다 | 기존 `node --test memo/test/memo.test.mjs`가 그대로 통과한다 |
 
+### 담당 팀
+dev
+
 ### 먼저 끝나야 할 것
 없음
 
@@ -29,6 +32,9 @@
 | 기준 | 확인 방법 |
 |---|---|
 | README에 `--sort title`, `--sort created` 예시가 각각 있다 | `node memo/cli.mjs list --sort title`의 출력이 README 예시와 같다 |
+
+### 담당 팀
+dev (작업 단위 1에 의존하므로 같은 팀)
 
 ### 먼저 끝나야 할 것
 작업 단위 1

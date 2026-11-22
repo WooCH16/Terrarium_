@@ -31,6 +31,55 @@ export function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e?.code === 'EPERM'; }
 }
 
+// 담당 팀(결정 8-29). 관제탑 카드 다섯 자리와 같은 값이다.
+export const TEAMS = ['dev', 'design', 'tester', 'plan', 'sec'];
+const isoOrNull = (v) => (typeof v === 'string' ? v : null);
+const nums = (v) => (Array.isArray(v) ? v.filter((n) => Number.isSafeInteger(n) && n > 0) : []);
+
+// 하달 기록(dispatch.json, run-operator·run-research가 쓴다). 없거나 깨졌으면 null(옛 하달).
+function readDispatch(file) {
+  let d;
+  try { d = JSON.parse(readFileSync(file, 'utf8')); } catch { return null; }
+  if (d === null || typeof d !== 'object' || Array.isArray(d)) return null;
+  return {
+    team: TEAMS.includes(d.team) ? d.team : null,
+    mode: d.mode === 'research' ? 'research' : 'work',
+    requested: nums(d.requested),
+    live: d.live === null || d.live === undefined ? null : nums(d.live),
+    excluded: Array.isArray(d.excluded) ? d.excluded.filter((x) => x && Number.isSafeInteger(x.issue)).map((x) => ({ issue: x.issue, reason: String(x.reason ?? '').slice(0, 20) })) : [],
+    base: typeof d.base === 'string' && /^h[1-9]\d*$/.test(d.base) ? d.base : null,
+    startedAt: isoOrNull(d.startedAt),
+    endedAt: isoOrNull(d.endedAt),
+    sessionOk: typeof d.sessionOk === 'boolean' ? d.sessionOk : null,
+  };
+}
+
+// 워커 기록(workers.jsonl, run-worker가 쓴다). 파일이 없으면 null(모름, 0이 아님). 깨진 줄은 건너뛴다.
+// 이슈마다 하나로 모은다: start가 있는 이슈만 워커다(모델을 못 골라 end만 있는 이슈는 워커가 아니다).
+function readWorkers(file) {
+  if (!existsSync(file)) return null;
+  let text;
+  try { text = readFileSync(file, 'utf8'); } catch { return null; }
+  const byIssue = new Map();
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let e;
+    try { e = JSON.parse(line); } catch { continue; }
+    if (!e || !Number.isSafeInteger(e.issue) || (e.event !== 'start' && e.event !== 'end')) continue;
+    const w = byIssue.get(e.issue) ?? { issue: e.issue, started: false, done: false, model: null, attempts: null, status: null };
+    if (e.event === 'start') { w.started = true; w.done = false; w.model = typeof e.model === 'string' ? e.model : w.model; }
+    else {
+      w.done = true;
+      w.status = typeof e.status === 'string' ? e.status : null;
+      w.attempts = Number.isSafeInteger(e.attempts) ? e.attempts : null;
+      const m = typeof e.actualModel === 'string' ? e.actualModel : typeof e.model === 'string' ? e.model : null;
+      if (m) w.model = m;
+    }
+    byIssue.set(e.issue, w);
+  }
+  return [...byIssue.values()].filter((w) => w.started);
+}
+
 export function readHandoffs(run, alive = pidAlive) {
   const dir = `${run}/handoffs`;
   if (!existsSync(dir)) return [];
@@ -38,6 +87,7 @@ export function readHandoffs(run, alive = pidAlive) {
     const d = `${dir}/${name}`;
     let session = null;
     try { session = JSON.parse(readFileSync(`${d}/session.json`, 'utf8')); } catch { /* 없음 */ }
+    const dispatch = readDispatch(`${d}/dispatch.json`);
     // 끝난 시각이 없고 적힌 프로세스(오퍼레이터, 드라이버, 러너) 중 하나라도 살아 있어야 도는 중이다.
     // 코디네이터가 하달 도중 Esc로 끊으면 하달 프로세스가 통째로 죽고 endedAt이 남지 않는다(run-18 h5). 그런 하달은 orphaned다.
     const recorded = [session?.pid, session?.driverPid, ...(Array.isArray(session?.pids) ? session.pids : [])].filter((p) => p !== undefined && p !== null);
@@ -46,10 +96,13 @@ export function readHandoffs(run, alive = pidAlive) {
     const running = open && recorded.some((p) => alive(p));
     return {
       name,
-      issues: session?.issues ?? [],
-      mode: session?.mode ?? null,
-      startedAt: session?.startedAt ?? null,
-      endedAt: session?.endedAt ?? null,
+      issues: session?.issues ?? dispatch?.live ?? [],
+      mode: session?.mode ?? dispatch?.mode ?? null,
+      team: dispatch?.team ?? null,
+      dispatch,
+      workers: readWorkers(`${d}/workers.jsonl`),
+      startedAt: session?.startedAt ?? dispatch?.startedAt ?? null,
+      endedAt: session?.endedAt ?? dispatch?.endedAt ?? null,
       stoppedAt: session?.stoppedAt ?? null,
       stopped,
       running,

@@ -6,7 +6,7 @@ import { loadOperatorConfig, ConfigError } from './config.mjs';
 import { nextHandoff } from './handoff.mjs';
 import { formatLine, exitCode } from './report.mjs';
 import { loadModeDocs, launchSession, isStopped } from './launch.mjs';
-import { makeGhDeps, defaultExec } from './run-operator.mjs';
+import { makeGhDeps, defaultExec, writeDispatch } from './run-operator.mjs';
 import { LABEL } from './protocol.mjs';
 
 const fwd = (p) => String(p).replace(/\\/g, '/').replace(/\/+$/, '');
@@ -43,10 +43,17 @@ export async function main(argv, env = process.env, deps = {}) {
     const launch = deps.launchSession ?? launchSession;
     const gh = deps.fetchIssue && deps.setState ? deps : makeGhDeps(config.designatedRepo, defaultExec(env));
 
+    // 하달 기록(결정 8-29): 조사도 하달 번호를 받으므로 남긴다. 조사 이슈에 `담당 팀:`이 있으면 그 팀 카드가 작업중이 된다.
+    // 조사는 워커를 부르지 않는 일이라 관제탑은 "작업 없이 호출"로 세지 않는다(mode: research).
+    const team = gh.fetchTeam ? await gh.fetchTeam(issue) : null;
+    let rec = { team, mode: 'research', requested: [issue], live: [issue], excluded: [], base: null, issueBases: {}, startedAt: new Date().toISOString(), endedAt: null, sessionOk: null, rows: null };
+    writeDispatch(run, handoff, rec);
+    const end = (extra) => { rec = { ...rec, endedAt: new Date().toISOString(), ...extra }; writeDispatch(run, handoff, rec); };
     await gh.ensureLabels?.();
     // 한 번만 시도한다(재시작 없음). 시작 실패는 반복하지 않고 바로 오류로 끝낸다.
     const r = await launch({ mode: 'research', handoff, run, harnessDir, issue, prompt, timeoutMs: deps.timeoutMs ?? DEFAULT_TIMEOUT_MS });
     if (r.spawnError !== undefined) {
+      end({ sessionOk: false });
       return fail(`세션을 시작할 수 없습니다: ${r.spawnError}. HARNESS_CLAUDE_BIN(기본 claude)은 실행 파일로 직접 실행할 수 있어야 합니다. claude.exe 또는 .js/.mjs 진입 파일 경로를 HARNESS_CLAUDE_BIN에 지정하세요(.cmd 래퍼는 지원하지 않습니다).`);
     }
     if (isStopped(run, handoff)) return exitCode([], { stopped: true });
@@ -54,6 +61,7 @@ export async function main(argv, env = process.env, deps = {}) {
     if (!ok) await gh.setState(issue, LABEL.보류);
     const { state, url } = await gh.fetchIssue(issue);
     const row = { number: issue, state: ok ? state : LABEL.보류, url };
+    end({ sessionOk: ok, rows: [{ number: issue, state: row.state }] });
     write(formatLine(row));
     return exitCode([row]);
   } catch (e) {

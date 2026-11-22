@@ -120,7 +120,8 @@ function bashTouchesProtected(command, cwd, config) {
 
 // 오퍼레이터 시작·중지 스크립트: 스크립트별로 허용 플래그와 값 모양을 고정한다(플래그는 한 번씩만).
 const OPERATOR_SCRIPTS = {
-  'run-operator.mjs': { '--issues': /^\d+(,\d+)*$/, '--handoff': /^h[1-9]\d*$/, required: ['--issues'] },
+  // --base h<N>: 반영 전인 하달 h<N>의 결과 위에서 시작한다(결정 8-31). 스크립트가 --handoff와 함께 쓰는 것을 거부한다.
+  'run-operator.mjs': { '--issues': /^\d+(,\d+)*$/, '--handoff': /^h[1-9]\d*$/, '--base': /^h[1-9]\d*$/, required: ['--issues'] },
   'run-research.mjs': { '--issue': /^\d+$/, required: ['--issue'] },
   'run-reflect.mjs': { '--handoff': /^h[1-9]\d*$/, required: ['--handoff'] },
   // ADR 0004: 리뷰어는 Pi 등으로 띄우는 별도 실행이다. 코디네이터는 이 스크립트로만 부른다(워커 모델은 스크립트가 이슈에서 읽는다).

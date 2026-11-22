@@ -93,3 +93,20 @@ test('I3: 같은 하달 재작업은 지원하지 않는다고 work.md·coordina
   assert.match(readFileSync(join(harnessDir, '..', 'docs', 'operator.md'), 'utf8'), /같은 하달 안의 재작업은 지원하지 않는다/);
   assert.match(readFileSync(join(harnessDir, '..', 'docs', 'operator.md'), 'utf8'), /--force-restart/);
 });
+
+test('결정 8-29·8-30·8-31: 담당 팀, 근거 칸 백틱, 시작 지점(--base)과 반영 순서가 규칙 문서에 있다', () => {
+  const c = read('coordinator/AGENT.md');
+  assert.match(c, /^- 담당 팀: dev /m, '이슈 양식에 담당 팀 줄');
+  assert.match(c, /하달 하나는 한 팀의 이슈만 받는다/);
+  assert.match(c, /--base h<N>/);
+  assert.match(c, /반영은 앞 하달부터 한다/);
+  assert.match(c, /팀 칸이 없거나 다섯 값이 아니면 그 이슈를 올리지 않고/);
+  const a = read('advisor/AGENT.md');
+  assert.match(a, /^### 담당 팀$/m);
+  assert.match(a, /의존으로 묶인 단위는 될 수 있으면 같은 팀/);
+  assert.match(a, /`main`이 아니라 작업 시작 지점과 비교/);
+  const o = read('operator/AGENT.md');
+  assert.match(o, /근거 칸의 백틱은 저장소 파일 경로에만 쓴다/);
+  assert.match(o, /`담당 팀:` 줄/);
+  assert.match(read('operator/skills/operator-work/SKILL.md'), /run-worker에 --base h<M>\/issue-/);
+});

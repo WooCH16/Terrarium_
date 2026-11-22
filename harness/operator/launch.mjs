@@ -69,9 +69,15 @@ export function claudeMdExcludes(dir, home = homedir()) {
   return [...new Set(out)];
 }
 
-export function sessionSettings({ mode, handoff, run, harnessDir, issue, worktree }) {
+export function sessionSettings({ mode, handoff, run, harnessDir, issue, worktree, baseHandoff }) {
   checkMode(mode);
   checkHandoff(handoff);
+  // 시작 지점 하달(결정 8-31): 작업 모드에서만, 자기 하달이 아닌 h<N>.
+  if (baseHandoff !== undefined && baseHandoff !== null) {
+    if (mode !== 'work') throw new ConfigError('시작 지점 하달은 작업 모드에만 쓸 수 있습니다');
+    checkHandoff(baseHandoff);
+    if (baseHandoff === handoff) throw new ConfigError('시작 지점 하달은 자기 하달과 달라야 합니다');
+  }
   const worker = mode === 'worker';
   if (worker) {
     if (!/^([a-zA-Z]:\/|\/)/.test(fwd(worktree ?? ''))) throw new ConfigError('워커의 워크트리는 절대 경로여야 합니다');
@@ -89,6 +95,7 @@ export function sessionSettings({ mode, handoff, run, harnessDir, issue, worktre
     command += ` --issue ${issue}`;
   }
   if (worker) command += ` --worktree "${fwd(worktree)}"`;
+  if (baseHandoff) command += ` --base-handoff ${baseHandoff}`;
   const who = worker ? 'worker' : 'operator';
   return {
     hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] },
@@ -118,9 +125,9 @@ export function killTree(pid) {
 }
 
 export function launchSession(opts, deps = {}) {
-  const { mode, handoff, run, harnessDir, issue, issues, prompt, timeoutMs } = opts;
+  const { mode, handoff, run, harnessDir, issue, issues, prompt, timeoutMs, baseHandoff } = opts;
   const spawn = deps.spawn ?? nodeSpawn;
-  const settings = sessionSettings({ mode, handoff, run, harnessDir, issue });
+  const settings = sessionSettings({ mode, handoff, run, harnessDir, issue, baseHandoff });
   const dir = `${fwd(run)}/handoffs/${handoff}`;
   const settingsFile = `${dir}/settings-${mode}.json`;
   const cwd = sessionCwd(run, handoff);

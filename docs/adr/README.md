@@ -14,7 +14,8 @@
 | [0008](0008-jev-reviewer-routing.md) | 리뷰어와 라우팅(워커 모델·유형)은 Jev(TypeSafe System One)가 판단하고 스크립트가 정한다 | 채택됨 | 0004 결정 B·C의 리뷰어 실행, 0006 결정 6, 결정 4-2·5-3의 리뷰어 후보·순환 | - |
 | [0009](0009-workers-via-pi.md) | 워커 세 모델을 모두 Pi로 띄운다(claude는 Pi의 Anthropic 계정, gemini는 `GEMINI_API_KEY`, 훅이 걸리는 워커는 없어짐) | 채택됨 | 0004 결정 A의 임시 경로(F5·F6) | - |
 | [0010](0010-desktop-app.md) | 데스크톱 앱: Electron(`app/`), 코디네이터는 stream-json 자식 프로세스, 키는 safeStorage와 환경 변수로만, 진행 표시는 읽기 전용 새 화면, 서명 없는 NSIS | 채택됨 | - | 결정 2·4·7 (→ 0011) |
-| [0011](0011-tower-terminal.md) | 앱 본창은 소유자의 관제탑 화면, 코디네이터는 ORCHESTRA 칸의 대화형 Claude Code 터미널(node-pty, xterm), 계정·설치·진행은 설정 창 | 채택됨 | 0010 결정 2·4·7 | - |
+| [0011](0011-tower-terminal.md) | 앱 본창은 소유자의 관제탑 화면, 코디네이터는 ORCHESTRA 칸의 대화형 Claude Code 터미널(node-pty, xterm), 계정·설치·진행은 설정 창 | 채택됨 | 0010 결정 2·4·7 | 덧붙임의 카드·상태·워커 (→ 0012) |
+| [0012](0012-role-operators.md) | 역할 오퍼레이터: 이슈의 담당 팀(dev·design·tester·plan·sec), 하달 하나 = 한 팀, 하달·워커 기록, 관제탑 카드 다섯 = 팀, 반영 전 하달 위에서 시작하는 `--base`와 반영 순서 | 채택됨 | 0011 덧붙임의 카드·상태·워커(결정 8-19) | - |
 
 ## 규칙
 

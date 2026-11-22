@@ -259,6 +259,9 @@ test('publicOnly를 켜고 공개 가능 표시가 없어 muse를 건너뛰고 �
   assert.equal(r.rec.attempts, 0);
   assert.match(r.rec.failures[0], /muse\(공개 가능 표시 없음\)/);
   assert.equal(s.worktrees().length, 1);
+  // 워커 기록(결정 8-29): 러너를 띄우지 않았으므로 end 한 줄만(관제탑은 start가 있는 이슈만 워커로 센다).
+  const lines = readFileSync(`${s.run}/handoffs/h1/workers.jsonl`, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(lines.map((l) => [l.event, l.issue, l.status, l.attempts]), [['end', 7, '막힘', 0]]);
 });
 
 test('지정 모델이 muse면 공개 가능 표시 없이도 muse로 띄운다(대체가 아니다)', T, async () => {

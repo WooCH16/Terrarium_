@@ -171,38 +171,127 @@ test('설치(결정 8-28): 저장소가 없으면 동의(createRepo) 없이는 s
   assert.ok(!calls.at(-1).includes('--create-repo'));
 });
 
-test('관제탑: 최근 하달이 카드 자리에, 맡은 이슈가 워커로, 라벨이 단계로 들어간다', async () => {
+// 관제탑(결정 8-29, ADR 0012): 카드 다섯 = 역할 오퍼레이터. 하달 기록(dispatch.json)·워커 기록(workers.jsonl)을 가짜로 둔다.
+function towerRun() {
   const run = tmp();
   writeFileSync(`${run}/harness.json`, JSON.stringify({ designatedRepo: 'o/r' }));
-  for (let n = 1; n <= 6; n++) mkdirSync(`${run}/handoffs/h${n}`, { recursive: true });
-  for (let n = 1; n <= 5; n++) writeFileSync(`${run}/handoffs/h${n}/session.json`, JSON.stringify({ mode: 'work', issues: [n], pids: [], startedAt: '2026-11-20T01:00:00Z', endedAt: '2026-11-20T01:30:00Z' }));
-  writeFileSync(`${run}/handoffs/h6/session.json`, JSON.stringify({ mode: 'work', issues: [6, 7], pid: 5, pids: [] }));
-  writeFileSync(`${run}/handoffs/h5/stopped.json`, '{}');
-  const gh = () => JSON.stringify([{ number: 6, title: '정렬', state: 'OPEN', labels: [{ name: '리뷰대기' }], url: 'u' }, { number: 7, title: 'x', state: 'OPEN', labels: [{ name: '막힘' }], url: 'u' }, { number: 2, title: 'y', state: 'CLOSED', labels: [{ name: '반영됨' }], url: 'u' }]);
+  mkdirSync(`${run}/handoffs`, { recursive: true });
+  return run;
+}
+// h<N>: 팀, 세션(없으면 세션을 안 띄운 하달), 하달 기록, 워커 기록 줄.
+function handoff(run, n, { team, mode = 'work', session, dispatch = {}, workers, stopped = false, legacy = false } = {}) {
+  const d = `${run}/handoffs/h${n}`;
+  mkdirSync(d, { recursive: true });
+  if (session) writeFileSync(`${d}/session.json`, JSON.stringify(session));
+  if (!legacy) writeFileSync(`${d}/dispatch.json`, JSON.stringify({ team: team ?? null, mode, requested: [n], live: [n], excluded: [], base: null, startedAt: '2026-11-20T01:00:00Z', endedAt: '2026-11-20T01:30:00Z', sessionOk: true, ...dispatch }));
+  if (workers) writeFileSync(`${d}/workers.jsonl`, workers.map((w) => (typeof w === 'string' ? w : JSON.stringify(w))).join('\n') + '\n');
+  if (stopped) writeFileSync(`${d}/stopped.json`, '{}');
+}
+const ended = (issues) => ({ mode: 'work', issues, pids: [], startedAt: '2026-11-20T01:00:00Z', endedAt: '2026-11-20T01:30:00Z' });
+const start = (issue, model = 'claude') => ({ event: 'start', issue, requestedModel: model, model, base: 'main' });
+const end = (issue, attempts = 1, status = '완료', model = 'claude') => ({ event: 'end', issue, status, attempts, model, actualModel: model });
+const noGh = () => '[]';
+
+test('관제탑: 하달이 없어도 카드 다섯(dev·design·tester·plan·sec), 모두 대기중이고 빈 자리가 없다. 이름은 넣지 않는다', async () => {
+  const run = towerRun();
+  const v = towerView(await readStatus(run, noGh));
+  assert.deepEqual(v.operators.map((o) => o.id), ['dev', 'design', 'tester', 'plan', 'sec']);
+  assert.deepEqual(SLOTS, ['dev', 'design', 'tester', 'plan', 'sec']);
+  assert.deepEqual(v.operators.map((o) => o.state), Array(5).fill('idle'));
+  assert.ok(v.operators.every((o) => !('name' in o)), '카드 이름은 화면(NAMES)이 정한다');
+  assert.ok(!JSON.stringify(v).includes('빈 자리'));
+  assert.deepEqual(v.operators[0].log, ['아직 호출된 적 없음']);
+  for (const x of [towerView(null), towerView(null, '권한 없음')]) {
+    assert.deepEqual(x.operators.map((o) => [o.id, o.state]), SLOTS.map((s) => [s, 'idle']));
+    assert.ok(!JSON.stringify(x).includes('빈 자리'));
+  }
+  assert.match(towerView(null, '권한 없음').operators[2].log[0], /상태를 못 읽음: 권한 없음/);
+  assert.match(towerView(null).note, /실행 폴더를 고르세요/);
+});
+
+test('관제탑: dev 하달이 도는 중이면 dev만 작업중이고 워커 상자는 도는 하달의 것이다(한 팀에 하달 둘: 끝남, 도는 중)', async () => {
+  const run = towerRun();
+  handoff(run, 1, { team: 'dev', session: ended([1]), workers: [start(1), end(1)] });
+  handoff(run, 2, { team: 'dev', session: { mode: 'work', issues: [2, 3], pid: 5, pids: [], startedAt: '2026-11-20T02:00:00Z' }, dispatch: { live: [2, 3], endedAt: null, sessionOk: null }, workers: [start(2), start(3, 'gemini'), end(3, 2, '완료', 'gemini')] });
+  const gh = () => JSON.stringify([{ number: 2, title: '정렬', state: 'OPEN', labels: [{ name: '진행중' }], url: 'u' }, { number: 3, title: 'x', state: 'OPEN', labels: [{ name: '리뷰대기' }], url: 'u' }]);
   const v = towerView(await readStatus(run, gh, { alive: (p) => p === 5 }));
-  assert.deepEqual(v.operators.map((o) => o.id), SLOTS, '자리 다섯 개는 그대로');
-  assert.deepEqual(v.operators.map((o) => o.name), ['하달 h2', '하달 h3', '하달 h4', '하달 h5', '하달 h6'], '최근 다섯 개, 오래된 것이 왼쪽');
-  assert.deepEqual(v.operators.map((o) => o.state), ['idle', 'idle', 'idle', 'pause', 'work'], '끝남=대기, 멈춤=일시정지, 오퍼레이터 pid가 있고 끝나지 않음=작업중');
-  assert.deepEqual(v.operators[4].workers.map((w) => [w.id, w.state, w.progress]), [['#6', 'work', 60], ['#7', 'pause', 30]]);
-  assert.deepEqual(v.operators[0].workers.map((w) => [w.state, w.progress]), [['idle', 100]], '반영됨은 끝까지');
-  assert.match(v.operators[3].log.at(-1), /멈춤/);
-  const few = towerView(await readStatus(run, () => { throw new Error('gh 로그인 필요'); }));
-  assert.match(few.operators[0].log.at(-1), /이슈를 못 읽음/);
-  assert.deepEqual(towerView(null).operators.map((o) => o.name), Array(5).fill('빈 자리'));
-  assert.match(towerView(null, '권한 없음').note, /권한 없음/);
+  assert.deepEqual(v.operators.map((o) => o.state), ['work', 'idle', 'idle', 'idle', 'idle']);
+  const dev = v.operators[0];
+  assert.deepEqual(dev.workers.map((w) => [w.id, w.name, w.state, w.progress]), [['#2', '#2 claude', 'work', 30], ['#3', '#3 gemini 2회', 'idle', 60]]);
+  assert.equal(dev.log.length, 3, '상세 창은 마지막 세 줄만 그린다');
+  assert.equal(dev.log[0], '누적 · 호출 2회 · 작업 없이 0회 · 워커 3명');
+  assert.match(dev.log[1], /^h2 \d\d:\d\d~ · 이슈 #2, #3 · 워커 2명$/);
+  assert.equal(dev.log[2], '지금 · 도는 중');
+});
+
+test('관제탑: tester의 가장 최근 하달이 멈춤이면 일시정지, 그 뒤에 끝난 하달이 하나 더 있으면 대기중', async () => {
+  const run = towerRun();
+  handoff(run, 1, { team: 'tester', session: { ...ended([1]), stoppedAt: '2026-11-20T01:10:00Z' }, stopped: true, workers: [start(1)] });
+  let v = towerView(await readStatus(run, noGh));
+  assert.equal(v.operators[2].state, 'pause');
+  assert.match(v.operators[2].log.at(-1), /멈춤\(stop-operator\)/);
+  assert.equal(v.operators[2].log[0], '누적 · 호출 1회 · 작업 없이 0회 · 워커 1명', '멈춘 하달은 작업 없이로 세지 않는다');
+  handoff(run, 2, { team: 'tester', session: ended([2]), workers: [start(2), end(2)] });
+  v = towerView(await readStatus(run, noGh));
+  assert.equal(v.operators[2].state, 'idle');
+  assert.match(v.operators[2].log.at(-1), / · 끝남$/);
+});
+
+test('관제탑: 팀 없는 옛 하달 여섯 개만 있으면 다섯 장 모두 대기중이고 "옛 하달 6개" 줄이 있다(설정 창 진행 기록에는 그대로)', async () => {
+  const run = towerRun();
+  for (let n = 1; n <= 6; n++) handoff(run, n, { legacy: true, session: ended([n]) });
+  const s = await readStatus(run, noGh);
+  assert.equal(s.handoffs.length, 6, '설정 창의 진행 기록은 옛 하달도 모두 읽는다');
+  assert.deepEqual(s.handoffs.map((h) => [h.team, h.workers]), Array(6).fill([null, null]), '옛 하달은 팀 없음, 워커 모름(0이 아님)');
+  const v = towerView(s);
+  assert.deepEqual(v.operators.map((o) => o.state), Array(5).fill('idle'));
+  for (const o of v.operators) assert.deepEqual(o.log, ['팀 없는 옛 하달 6개는 설정 창 진행 기록에', '아직 호출된 적 없음']);
+});
+
+test('관제탑: 워커 둘을 부른 하달은 워커 상자 둘과 "워커 2명". 모델을 못 골라 end만 있는 이슈와 깨진 줄은 워커로 세지 않는다', async () => {
+  const run = towerRun();
+  handoff(run, 1, { team: 'design', session: ended([1, 2, 3]), dispatch: { live: [1, 2, 3] }, workers: [start(1), end(1), '{깨진 줄', start(2), end(2, 3, '막힘'), { event: 'end', issue: 3, status: '막힘', attempts: 0, model: null }] });
+  const o = towerView(await readStatus(run, noGh)).operators[1];
+  assert.deepEqual(o.workers.map((w) => [w.name, w.state]), [['#1 claude 1회', 'idle'], ['#2 claude 3회', 'pause']]);
+  assert.match(o.log[1], /워커 2명$/);
+  assert.equal(o.log[0], '누적 · 호출 1회 · 작업 없이 0회 · 워커 2명');
+});
+
+test('관제탑: 모두 대기로 빠진 하달은 워커 상자 0, "작업 없이 호출됨", 누적의 "작업 없이 1회". 세션은 떴지만 워커가 없으면 사유가 다르다', async () => {
+  const run = towerRun();
+  handoff(run, 1, { team: 'plan', dispatch: { requested: [14], live: [], excluded: [{ issue: 14, reason: '대기' }] } });
+  let o = towerView(await readStatus(run, noGh)).operators[3];
+  assert.deepEqual(o.workers, []);
+  assert.equal(o.state, 'idle');
+  assert.equal(o.log[0], '누적 · 호출 1회 · 작업 없이 1회 · 워커 0명');
+  assert.equal(o.log.at(-1), '작업 없이 호출됨 · #14 대기');
+  handoff(run, 2, { team: 'plan', session: ended([15]), dispatch: { live: [15], sessionOk: false } });
+  o = towerView(await readStatus(run, noGh)).operators[3];
+  assert.equal(o.log[0], '누적 · 호출 2회 · 작업 없이 2회 · 워커 0명');
+  assert.equal(o.log.at(-1), '작업 없이 호출됨 · 세션 실패');
+});
+
+test('관제탑: 조사 하달은 그 팀 카드에 들어가지만 "작업 없이"로 세지 않는다', async () => {
+  const run = towerRun();
+  handoff(run, 1, { team: 'sec', mode: 'research', session: { mode: 'research', issues: [4], pid: 9, pids: [], startedAt: '2026-11-20T01:00:00Z' }, dispatch: { endedAt: null } });
+  let o = towerView(await readStatus(run, noGh, { alive: (p) => p === 9 })).operators[4];
+  assert.equal(o.state, 'work', '조사 하달이 도는 동안 그 팀 카드가 작업중');
+  handoff(run, 2, { team: 'sec', mode: 'research', session: { ...ended([5]), mode: 'research' } });
+  o = towerView(await readStatus(run, noGh, { alive: () => false })).operators[4];
+  assert.match(o.log[0], /작업 없이 0회/);
+  assert.match(o.log.at(-1), / · 끝남$/);
 });
 
 test('하달: 끝난 시각이 없어도 적힌 프로세스가 다 죽었으면 도는 중이 아니라 orphaned(관제탑은 일시정지와 정리 안내)', async () => {
-  const run = tmp();
-  writeFileSync(`${run}/harness.json`, JSON.stringify({ designatedRepo: 'o/r' }));
-  mkdirSync(`${run}/handoffs/h1`, { recursive: true });
-  writeFileSync(`${run}/handoffs/h1/session.json`, JSON.stringify({ mode: 'work', issues: [1], pid: 111, driverPid: 222 }));
-  const gh = () => '[]';
-  const dead = await readStatus(run, gh, { alive: () => false });
+  const run = towerRun();
+  handoff(run, 1, { team: 'dev', session: { mode: 'work', issues: [1], pid: 111, driverPid: 222 }, dispatch: { endedAt: null, sessionOk: null } });
+  const dead = await readStatus(run, noGh, { alive: () => false });
   assert.deepEqual([dead.handoffs[0].running, dead.handoffs[0].orphaned], [false, true]);
   const card = towerView(dead).operators[0];
   assert.equal(card.state, 'pause');
   assert.match(card.log.at(-1), /stop-operator로 정리/);
-  const live = await readStatus(run, gh, { alive: (p) => p === 222 });
+  const live = await readStatus(run, noGh, { alive: (p) => p === 222 });
   assert.deepEqual([live.handoffs[0].running, live.handoffs[0].orphaned], [true, false], '드라이버만 살아 있어도 도는 중');
+  const few = towerView(await readStatus(run, () => { throw new Error('gh 로그인 필요'); }, { alive: () => false }));
+  assert.match(few.operators[0].log.at(-1), /이슈를 못 읽음/);
 });

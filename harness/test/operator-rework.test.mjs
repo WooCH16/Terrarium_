@@ -321,7 +321,9 @@ test('대기(8-5, #23): T11 모양 — 의존 이슈의 라벨은 리뷰대기, 
   assert.deepEqual(d2.lines, ['#8 | 진행중 | https://github.com/o/r/issues/8']);
 });
 
-test('대기(8-5, #23): 같은 --issues 안의 의존, 판정이 없거나 거부된 의존, 이미 main에 있는 의존은 기다리지 않는다', T, async () => {
+// 결정 8-29 단위 4로 바뀜: 전에는 허용 전(판정 없음·거부·재작업 중)인 밖의 의존을 기다리지 않고 main에서 시작했다(앞 이슈 코드 없이 시작해 run-8처럼 충돌).
+// 이제는 main에 없는 밖의 의존은 허용 전이어도 대기다. 같은 --issues 안의 의존과 이미 main에 있는 의존만 기다리지 않는다.
+test('대기(8-29 단위 4): 같은 --issues 안의 의존과 main에 있는 의존은 기다리지 않고, 판정이 없거나 거부된 밖의 의존은 기다린다', T, async () => {
   const f = fixture();
   const s5 = branch(f, 'h1/issue-5', 'feature5.txt', 'five\n');
   land(f, 5, s5);
@@ -334,13 +336,15 @@ test('대기(8-5, #23): 같은 --issues 안의 의존, 판정이 없거나 거�
     6: { label: '허용됨' },
     4: { label: '리뷰대기', comments: [reportOf(s4), allowOf(s4), cm('## 리뷰어 판정: 거부\n\n이유')] },
     9: { label: '진행중', body: dependsBody(4, 5, 6) },
+    10: { label: '진행중', body: dependsBody(5) },
   });
   const launched = [];
-  await dispatch(f, repo, [7, 8, 9], launched);
-  assert.deepEqual(launched.map((l) => l.issues), [[7, 8, 9]]);
+  const d = await dispatch(f, repo, [7, 8, 9, 10], launched);
+  assert.deepEqual(launched.map((l) => l.issues), [[7, 8, 10]]);
+  assert.ok(d.lines.includes('#9 | 대기 | https://github.com/o/r/issues/9'));
 });
 
-test('대기(8-5, #23): 허용 판정 뒤에 새 결과 보고서가 있는(재작업 중인) 의존은 허용으로 보지 않는다', T, async () => {
+test('대기(8-29 단위 4): 허용 판정 뒤에 새 결과 보고서가 있는(재작업 중인) 밖의 의존도 main에 없으면 기다린다', T, async () => {
   const f = fixture();
   const sha = branch(f, 'h1/issue-7', 'feature7.txt', 'seven\n');
   const repo = fakeRepo({
@@ -348,6 +352,21 @@ test('대기(8-5, #23): 허용 판정 뒤에 새 결과 보고서가 있는(재�
     8: { label: '진행중', body: dependsBody(7) },
   });
   const launched = [];
-  await dispatch(f, repo, [8], launched);
-  assert.deepEqual(launched.map((l) => l.issues), [[8]]);
+  const d = await dispatch(f, repo, [8], launched);
+  assert.deepEqual(launched, [], '모두 대기면 세션을 띄우지 않는다');
+  assert.deepEqual(d.lines, ['#8 | 대기 | https://github.com/o/r/issues/8']);
+});
+
+test('대기(8-29 단위 4): 코드가 main에 오지 않는 의존(취소 라벨, 유형 조사)은 기다리지 않는다. 닫힘만으로는 빼지 않는다', T, async () => {
+  const f = fixture();
+  const repo = fakeRepo({
+    3: { label: '취소' },
+    4: { label: '진행중', body: '## 목표\n자료\n\n## 영역, 워커 모델, 유형\n- 유형: 조사 (Jev 라우팅, 확률 0.90)\n\n## 의존하는 이슈\n없음\n' },
+    5: { label: '진행중' },
+    8: { label: '진행중', body: dependsBody(3, 4) },
+    9: { label: '진행중', body: dependsBody(5) },
+  });
+  const launched = [];
+  await dispatch(f, repo, [8, 9], launched);
+  assert.deepEqual(launched.map((l) => l.issues), [[8]], '#9는 작업 이슈 #5가 main에 없어 대기');
 });

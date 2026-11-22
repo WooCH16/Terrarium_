@@ -21,6 +21,30 @@ export function plainLines(text) {
 const ITEM = '#[1-9]\\d{0,8}(?:[ \\t]*\\([^()#\\r\\n]{0,80}\\))?';
 const NUMS = new RegExp(`^${ITEM}(?:(?:[ \\t]*,[ \\t]*|[ \\t]+)${ITEM})*$`);
 
+// 담당 팀(결정 8-29): 관제탑 카드 다섯 자리와 같은 값. 이름은 관제탑 화면(js/app.js의 NAMES)과 같다.
+export const TEAMS = ['dev', 'design', 'tester', 'plan', 'sec'];
+export const TEAM_NAMES = { dev: '개발팀', design: '디자인', tester: '테스터', plan: '기획', sec: '보안팀' };
+
+// `- 담당 팀: <값>` 한 줄. 값은 다섯 가운데 하나(대소문자 무시)이고 뒤에 설명("dev (개발팀)")을 붙여도 된다.
+// 줄이 없거나, 둘 이상이거나, 모르는 값이면 null(팀 없음).
+export function parseTeam(body) {
+  const found = plainLines(body).flatMap((l) => {
+    const m = /^\s*[-*]?\s*담당 팀\s*:\s*([A-Za-z]+)(?![A-Za-z0-9_-])/.exec(l);
+    return m ? [m[1].toLowerCase()] : (/^\s*[-*]?\s*담당 팀\s*:/.test(l) ? [null] : []);
+  });
+  if (found.length !== 1) return null;
+  return TEAMS.includes(found[0]) ? found[0] : null;
+}
+
+// `- 유형: <작업|조사>` 한 줄(route-issue가 적는다). 없거나 둘 이상이면 null.
+export function parseKind(body) {
+  const found = plainLines(body).flatMap((l) => {
+    const m = /^\s*[-*]?\s*유형\s*:\s*(작업|조사)(?![\p{L}])/u.exec(l);
+    return m ? [m[1]] : [];
+  });
+  return found.length === 1 ? found[0] : null;
+}
+
 // `## 의존하는 이슈` 절만 읽는다. 절이 없거나 둘 이상이거나 모양이 다르면 null(불명확하면 제외한다).
 export function parseDependsOn(body) {
   const lines = plainLines(body);

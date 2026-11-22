@@ -26,7 +26,10 @@ function workScripts(config) {
     'run-worker.mjs': { '--handoff': handoff, '--issue': (v) => NUM.test(v), '--model': (v) => /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(v),
       // 같은 하달 안의 의존 이슈는 앞 이슈의 이슈 브랜치에서 시작한다(run-8: main에서 시작해 앞 이슈를 다시 만들고 충돌했다.
       // run-11: 통합 브랜치에서 시작하면 범위에 병합 커밋이 들어가 반영 무결성 검사가 거부했다).
-      '--base': (v) => v === 'main' || new RegExp(`^${config.handoff}/issue-[1-9][0-9]{0,8}$`).test(v), required: ['--handoff', '--issue', '--model'] },
+      // 시작 지점 하달(--base-handoff, 결정 8-31)이 있으면 그 하달의 이슈 브랜치도 받는다. 그 하달의 통합 브랜치는 받지 않는다(같은 이유).
+      '--base': (v) => v === 'main' || new RegExp(`^${config.handoff}/issue-[1-9][0-9]{0,8}$`).test(v)
+        || (typeof config.baseHandoff === 'string' && /^h[1-9]\d*$/.test(config.baseHandoff) && config.baseHandoff !== config.handoff && new RegExp(`^${config.baseHandoff}/issue-[1-9][0-9]{0,8}$`).test(v)),
+      required: ['--handoff', '--issue', '--model'] },
     'merge-adapter-enqueue.mjs': { '--handoff': handoff, required: ['--handoff'] },
     // run-worker가 9분 안에 안 끝나면 종료 코드 8과 대기 번호를 낸다. 이어서 기다리는 명령(run-8).
     'wait-operator.mjs': { '--wait': (v) => /^[0-9a-f]{12}$/.test(v), required: ['--wait'] },

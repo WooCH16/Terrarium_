@@ -6,8 +6,8 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { loadOperatorConfig, ConfigError } from './config.mjs';
 import { nextHandoff } from './handoff.mjs';
 import { formatReport, exitCode, STATES, NO_LABEL, ENSURED_LABELS } from './report.mjs';
-import { parseDependsOn } from './issue-body.mjs';
-import { collectAllowed, provenIssuesOnMain, makeFetchIssueData } from './merge-adapter.mjs';
+import { parseDependsOn, parseTeam, parseKind, TEAM_NAMES } from './issue-body.mjs';
+import { provenIssuesOnMain, makeFetchIssueData } from './merge-adapter.mjs';
 import { loadModeDocs, launchSession, cleanupHandoff, isStopped, handoffHasWork } from './launch.mjs';
 import { REPORT_HEAD, VERDICT_HEAD, LABEL } from './protocol.mjs';
 
@@ -55,7 +55,7 @@ function parseArgs(argv) {
   if (forceRestart) argv = argv.filter((t) => t !== '--force-restart');
   for (let i = 0; i < argv.length; i += 2) {
     const flag = argv[i];
-    if (flag !== '--issues' && flag !== '--handoff') throw new UsageError(`알 수 없는 인자입니다: ${JSON.stringify(flag).slice(0, 40)}. 사용법: --issues <n,n,...> [--handoff h<N> [--force-restart]]`);
+    if (flag !== '--issues' && flag !== '--handoff' && flag !== '--base') throw new UsageError(`알 수 없는 인자입니다: ${JSON.stringify(flag).slice(0, 40)}. 사용법: --issues <n,n,...> [--base h<N>] [--handoff h<N> [--force-restart]]`);
     if (flag in seen) throw new UsageError(`인자 ${flag}가 두 번 이상 있습니다.`);
     const value = argv[i + 1];
     if (value === undefined) throw new UsageError(`인자 ${flag}에 값이 필요합니다.`);
@@ -68,7 +68,32 @@ function parseArgs(argv) {
   const handoff = seen['--handoff'];
   if (handoff !== undefined && !/^h[1-9]\d*$/.test(handoff)) throw new UsageError('--handoff는 h<번호> 모양이어야 합니다(예: h1).');
   if (forceRestart && handoff === undefined) throw new UsageError('--force-restart는 --handoff와 함께만 쓸 수 있습니다.');
-  return { issues, handoff, forceRestart };
+  const base = seen['--base'];
+  if (base !== undefined && !/^h[1-9]\d{0,8}$/.test(base)) throw new UsageError('--base는 h<번호> 모양이어야 합니다(예: h1).');
+  // 이어받기(--handoff)는 처음 하달의 시작 지점을 그대로 쓴다. 다시 정하지 않는다.
+  if (base !== undefined && handoff !== undefined) throw new UsageError('--base는 새 하달에만 쓸 수 있습니다(--handoff와 함께 쓰지 않습니다).');
+  return { issues, handoff, forceRestart, base };
+}
+
+// 하달 기록(결정 8-29): handoffs/h<N>/dispatch.json. 팀, 넘긴 이슈, 뺀 이슈와 사유, 시작 지점, 끝 상태.
+// handoffs/ 아래라 코디네이터·오퍼레이터 훅이 쓰기를 막는다. 쓰기 실패는 하달 결과를 바꾸지 않는다.
+export const dispatchFile = (run, handoff) => `${run}/handoffs/${handoff}/dispatch.json`;
+export function writeDispatch(run, handoff, data) {
+  try {
+    const f = dispatchFile(run, handoff);
+    writeFileSync(`${f}.tmp`, JSON.stringify(data, null, 2));
+    renameSync(`${f}.tmp`, f);
+  } catch { /* 기록 실패는 결과를 바꾸지 않는다 */ }
+}
+
+// 시작 지점 하달(--base h<N>, 결정 8-31)의 이슈 브랜치: 이슈 번호 → { branch, sha }. 끝이 main의 조상이 아닌 것(반영 전)만.
+// 반영 전 브랜치가 하나도 없으면 빈 Map이다(그 하달은 이미 반영됐다: main에서 시작한다).
+export function unreflectedTips(git, memo, handoff) {
+  const out = git(memo, ['for-each-ref', '--format=%(refname:lstrip=2) %(objectname)', `refs/heads/${handoff}/`]);
+  const re = new RegExp(`^${handoff}/issue-([1-9]\\d{0,8}) ([0-9a-f]{40})$`);
+  const all = out.split('\n').map((s) => re.exec(s.trim())).filter(Boolean).map((m) => ({ n: Number(m[1]), branch: `${handoff}/issue-${m[1]}`, sha: m[2] }));
+  const onMain = (sha) => { try { git(memo, ['merge-base', '--is-ancestor', sha, 'refs/heads/main']); return true; } catch { return false; } };
+  return { count: all.length, tips: new Map(all.filter((t) => !onMain(t.sha)).map((t) => [t.n, t])) };
 }
 
 // gh 배선. exec(bin, args)는 stdout 문자열을 돌려준다(테스트에서 스텁으로 바꾼다).
@@ -113,6 +138,10 @@ export function makeGhDeps(repo, exec = defaultExec()) {
     async fetchDependsOn(n) {
       return parseDependsOn(view(n, 'body').body) ?? [];
     },
+    // 이슈 본문의 `- 담당 팀:` 값(결정 8-29). 없거나 모르는 값이면 null.
+    async fetchTeam(n) {
+      return parseTeam(view(n, 'body').body);
+    },
     // 대기 판단용: 본문·라벨·댓글(수정 시각 포함). 합치기 스크립트와 같은 방식으로 읽어 같은 허용 판정 기준(collectAllowed)을 쓴다.
     fetchIssueData: makeFetchIssueData(exec, repo),
     async setState(n, state) {
@@ -123,24 +152,39 @@ export function makeGhDeps(repo, exec = defaultExec()) {
   };
 }
 
-function header({ handoff, issues, run, config }) {
-  return [
+function header({ handoff, issues, run, config, team, base, issueBases }) {
+  const lines = [
     '# 이번 세션',
     `- 하달: ${handoff}`,
+    `- 담당 팀: ${team ? `${TEAM_NAMES[team]}(${team})` : '없음'}`,
     `- 이슈: ${issues.map((n) => `#${n}`).join(', ')}`,
     `- 실행 폴더: ${run}`,
     `- 지정 저장소: ${config.designatedRepo}`,
     `- 이슈 클론: ${config.issuesClone}`,
     `- 대상 프로젝트: ${config.targetProject}`,
     `- 작업 폴더: ${config.worktrees}/${handoff}`,
-  ].join('\n');
+  ];
+  // 시작 지점(결정 8-31): 반영 전인 하달 h<N>의 결과 위에서 시작하는 이슈와 그 기준 브랜치. 워커를 부를 때 그대로 --base로 넘긴다.
+  if (base) {
+    lines.push(`- 시작 지점: ${base} (아직 main에 반영 전)`);
+    for (const n of issues) if (issueBases[n]) lines.push(`  - #${n}: run-worker에 --base ${issueBases[n]}`);
+  } else lines.push('- 시작 지점: main');
+  return lines.join('\n');
 }
 
 export async function main(argv, env = process.env, deps = {}) {
   const write = deps.write ?? ((line) => console.log(line));
-  const fail = (reason) => { write(`오류: ${ONE_LINE(reason)}`); return 2; };
+  // 하달 폴더를 만든 뒤에 실패하면 하달 기록의 끝을 채운다(세션 없이 끝난 것도 기록에 남는다).
+  let record = null;
+  const closeRecord = (extra) => {
+    if (!record) return;
+    record.data = { ...record.data, endedAt: new Date().toISOString(), ...extra };
+    writeDispatch(record.run, record.handoff, record.data);
+    record = null;
+  };
+  const fail = (reason) => { closeRecord({ sessionOk: false }); write(`오류: ${ONE_LINE(reason)}`); return 2; };
   try {
-    const { issues, handoff: wanted, forceRestart } = parseArgs(argv);
+    const { issues, handoff: wanted, forceRestart, base: baseWanted } = parseArgs(argv);
     const run = fwd(env.HARNESS_RUN_DIR || process.cwd());
     const configFile = `${run}/harness.json`;
     if (!existsSync(configFile)) return fail(`실행 폴더에 harness.json이 없습니다: ${run}`);
@@ -148,6 +192,35 @@ export async function main(argv, env = process.env, deps = {}) {
     const harnessDir = fwd(config.harnessDir);
     const operatorConfig = loadOperatorConfig(`${harnessDir}/operator/operator.config.json`, { run });
     const docs = loadModeDocs('work', harnessDir);
+    const memo = fwd(config.targetProject);
+    const git = deps.git ?? ((cwd, args) => execFileSync('git', ['-C', cwd, '-c', 'core.fsmonitor=false', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }).trim());
+    const gh = deps.fetchIssue && deps.setState ? deps : makeGhDeps(config.designatedRepo, defaultExec(env));
+
+    // 담당 팀(결정 8-29): 하달 하나는 한 팀의 이슈만 받는다. 섞이면 하달 폴더를 만들기 전에 거부한다. 모두 팀 없음이면 옛 방식이다.
+    let team = null;
+    if (gh.fetchTeam) {
+      const teams = [];
+      for (const n of issues) teams.push({ n, team: await gh.fetchTeam(n) });
+      const kinds = [...new Set(teams.map((t) => t.team))];
+      if (kinds.length > 1) {
+        const a = teams[0];
+        const b = teams.find((t) => t.team !== a.team);
+        const show = (t) => `#${t.n}(${t.team ?? '팀 없음'})`;
+        return fail(`이슈 ${show(a)}와 ${show(b)}의 담당 팀이 다릅니다. 팀별로 따로 하달하세요.`);
+      }
+      team = kinds[0] ?? null;
+    }
+
+    // 시작 지점(--base h<N>, 결정 8-31): 그 하달이 없으면 거부한다. 반영 전 이슈 브랜치가 없으면(이미 반영됨) main에서 시작한다.
+    let base = null;
+    let baseTips = new Map();
+    if (baseWanted !== undefined) {
+      if (!existsSync(`${run}/handoffs/${baseWanted}`)) return fail(`시작 지점 하달 ${baseWanted} 폴더가 없습니다.`);
+      let found;
+      try { found = unreflectedTips(git, memo, baseWanted); } catch { return fail(`시작 지점 하달 ${baseWanted}의 브랜치를 읽을 수 없습니다.`); }
+      if (found.count === 0) return fail(`시작 지점 하달 ${baseWanted}에 이슈 브랜치가 없습니다(중단·정리됐을 수 있습니다). --base 없이 하달하거나 사용자에게 알리세요.`);
+      if (found.tips.size > 0) { base = baseWanted; baseTips = found.tips; }
+    }
 
     let handoff = wanted;
     if (handoff !== undefined) {
@@ -159,9 +232,24 @@ export async function main(argv, env = process.env, deps = {}) {
     } else {
       handoff = nextHandoff(run);
     }
+    const startedAt = new Date().toISOString();
+    // 이어받기는 처음 하달의 시작 지점을 그대로 쓴다(하달 기록에서 읽는다).
+    let issueBases = {};
+    if (wanted !== undefined) {
+      try {
+        const prev = JSON.parse(readFileSync(dispatchFile(run, handoff), 'utf8'));
+        if (typeof prev?.base === 'string' && /^h[1-9]\d{0,8}$/.test(prev.base) && prev.issueBases && typeof prev.issueBases === 'object') {
+          base = prev.base;
+          const own = new RegExp(`^${base}/issue-[1-9]\\d{0,8}$`);
+          for (const [k, v] of Object.entries(prev.issueBases)) if (/^[1-9]\d{0,8}$/.test(k) && typeof v === 'string' && own.test(v)) issueBases[k] = v;
+        }
+      } catch { /* 옛 하달(기록 없음)은 main에서 시작한 것이다 */ }
+    }
+    const baseNote = baseWanted !== undefined && base === null ? { baseRequested: baseWanted, baseNote: `${baseWanted}은 이미 main에 반영돼 main에서 시작함` } : {};
+    record = { run, handoff, data: { team, mode: 'work', requested: issues, live: null, excluded: [], base, ...baseNote, issueBases, startedAt, endedAt: null, sessionOk: null, rows: null } };
+    writeDispatch(run, handoff, record.data);
     const launch = deps.launchSession ?? launchSession;
     const cleanup = deps.cleanupHandoff ?? cleanupHandoff;
-    const gh = deps.fetchIssue && deps.setState ? deps : makeGhDeps(config.designatedRepo, defaultExec(env));
     const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     if (gh.ensureLabels) await gh.ensureLabels();
     // 새 하달(재작업 포함, 소유자 결정 2-3): 앞선 결과를 반영하지 않았어도 다시 하달할 수 있다.
@@ -170,9 +258,11 @@ export async function main(argv, env = process.env, deps = {}) {
     // - 합치기 스크립트가 건너뛰는 상태(허용됨·보류·막힘)와 라벨 없음은 진행중으로 되돌려 이번 하달의 결과가 합쳐지고 다시 리뷰되게 한다. 반영됨·거부목록은 건드리지 않는다.
     // --handoff로 이어받을 때는 라벨 없음만 진행중으로 둔다(재시작은 재작업이 아니다).
     // - 결과 없음(보고서 없이 끝난 새 하달)이 연달아 1 + noReportRetries번이면 막힘이다(결정 2-4). 한도를 넘긴 채 다시 하달해도 막힘으로 둔다.
-    // - 의존하는 이슈 가운데 이번 하달 밖의 것이 허용됐지만 아직 반영 안 됐으면 대기로 두고 뺀다. 새 하달의 브랜치는 main에서 시작하므로 그 변경이 없다.
-    //   "허용됐다"는 라벨이 아니라 합치기 스크립트와 같은 허용 판정 기준(collectAllowed: 최신 판정이 허용이고 보고서 해시와 묶임)으로,
+    // - 의존하는 이슈 가운데 이번 하달 밖의 것이 main에도 시작 지점 하달(--base)에도 없으면 대기로 두고 뺀다(결정 8-29 단위 4, 8-31).
+    //   허용 전이어도 기다린다: main에서 시작하면 앞 이슈의 코드가 없어 run-8처럼 충돌한다.
     //   "반영됐다"는 run-reflect와 같이 main의 병합 커밋(provenIssuesOnMain)으로 본다(이슈 #23: 허용된 이슈는 라벨이 리뷰대기로 남는다).
+    //   코드가 main에 오지 않는 의존(취소 라벨, 유형 조사)은 기다리지 않는다. 닫힘은 기준이 아니다(코디네이터가 반영 전에 닫는다).
+    //   시작 지점 하달에 반영 전 브랜치가 있는 의존은 그 브랜치에서 시작한다(issueBases). 그런 의존이 둘 이상이면 나머지를 모두 품은 브랜치 하나를 쓰고, 없으면 대기다.
     //   대기는 결과 없음으로 세지 않는다.
     const fresh = wanted === undefined;
     const blocked = new Set();
@@ -185,21 +275,38 @@ export async function main(argv, env = process.env, deps = {}) {
     for (const n of issues) await stateOf(n);
     const waitsOn = new Set();
     if (fresh && gh.fetchDependsOn && gh.fetchIssueData) {
-      const onMain = deps.provenOnMain ?? (() => provenIssuesOnMain((cwd, args) => execFileSync('git', ['-C', cwd, '-c', 'core.fsmonitor=false', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }).trim(), { memo: fwd(config.targetProject) }));
+      const onMain = deps.provenOnMain ?? (() => provenIssuesOnMain(git, { memo }));
+      const isAncestor = (a, b) => { try { git(memo, ['merge-base', '--is-ancestor', a, b]); return true; } catch { return false; } };
       let proven = null;
       const pending = new Map();
-      const awaitingLand = async (d) => {
+      const notOnMain = async (d) => {
         if (!pending.has(d)) {
-          const allowed = collectAllowed([{ ...(await gh.fetchIssueData(d)), labels: [] }]).length > 0;
-          if (allowed && proven === null) proven = onMain();
-          pending.set(d, allowed && !proven.has(d));
+          if (proven === null) proven = onMain();
+          let waits = !proven.has(d);
+          if (waits) {
+            const data = await gh.fetchIssueData(d);
+            const labels = (data?.labels ?? []).map((l) => (typeof l === 'string' ? l : l?.name));
+            if (labels.includes(LABEL.취소) || parseKind(data?.body) === '조사') waits = false;
+          }
+          pending.set(d, waits);
         }
         return pending.get(d);
       };
       for (const n of issues) {
-        for (const d of (await gh.fetchDependsOn(n)).filter((x) => !issues.includes(x))) {
-          if (await awaitingLand(d)) { waitsOn.add(n); break; }
+        const outside = (await gh.fetchDependsOn(n)).filter((x) => !issues.includes(x));
+        const inBase = outside.filter((d) => baseTips.has(d));
+        let waits = false;
+        for (const d of outside) {
+          if (inBase.includes(d)) continue;
+          if (await notOnMain(d)) { waits = true; break; }
         }
+        if (!waits && inBase.length > 0) {
+          const tip = (d) => baseTips.get(d).sha;
+          const top = inBase.find((d) => inBase.every((e) => e === d || isAncestor(tip(e), tip(d))));
+          if (top === undefined) waits = true;
+          else issueBases[n] = baseTips.get(top).branch;
+        }
+        if (waits) waitsOn.add(n);
       }
     }
     for (const n of issues) {
@@ -217,7 +324,13 @@ export async function main(argv, env = process.env, deps = {}) {
       } else if (gh.ensureLabels && state === NO_LABEL) await gh.setState(n, LABEL.진행중);
     }
     const live = issues.filter((n) => !blocked.has(n) && !held.has(n));
-    const prompt = `${header({ handoff, issues: live, run, config })}\n\n${docs}`;
+    for (const n of Object.keys(issueBases)) if (!live.includes(Number(n))) delete issueBases[n];
+    // 시작 지점을 실제로 쓰는 이슈가 없으면 이 하달은 main에서 시작한 것이다(훅도 그 하달의 브랜치를 받지 않는다).
+    if (Object.keys(issueBases).length === 0) base = null;
+    const excluded = issues.filter((n) => !live.includes(n)).map((n) => ({ issue: n, reason: held.has(n) ? LABEL.대기 : rejectedOut.has(n) ? LABEL.거부목록 : LABEL.막힘 }));
+    record.data = { ...record.data, base, issueBases, live, excluded };
+    writeDispatch(run, handoff, record.data);
+    const prompt = `${header({ handoff, issues: live, run, config, team, base, issueBases })}\n\n${docs}`;
 
     let ok = live.length === 0;
     const stopped = exitCode([], { stopped: true });
@@ -225,11 +338,11 @@ export async function main(argv, env = process.env, deps = {}) {
       // stop-operator의 중단 표시가 있으면 정리도 재시작도 하지 않고 조용히 끝낸다(출력 없음, 종료 코드 3).
       if (isStopped(run, handoff)) return stopped;
       if (attempt > 0) {
-        cleanup({ handoff, run, memo: fwd(config.targetProject) });
+        cleanup({ handoff, run, memo });
         // 정리는 git을 돌려 오래 걸릴 수 있다. 그 사이 stop-operator가 표시를 썼다면 다시 띄우지 않는다.
         if (isStopped(run, handoff)) return stopped;
       }
-      const r = await launch({ mode: 'work', handoff, run, harnessDir, issues: live, prompt, timeoutMs });
+      const r = await launch({ mode: 'work', handoff, run, harnessDir, issues: live, prompt, timeoutMs, ...(base ? { baseHandoff: base } : {}) });
       if (r.spawnError !== undefined) {
         return fail(`세션을 시작할 수 없습니다: ${r.spawnError}. HARNESS_CLAUDE_BIN(기본 claude)은 실행 파일로 직접 실행할 수 있어야 합니다. claude.exe 또는 .js/.mjs 진입 파일 경로를 HARNESS_CLAUDE_BIN에 지정하세요(.cmd 래퍼는 지원하지 않습니다).`);
       }
@@ -270,6 +383,7 @@ export async function main(argv, env = process.env, deps = {}) {
       }
     }
     rows.sort((a, b) => issues.indexOf(a.number) - issues.indexOf(b.number));
+    closeRecord({ sessionOk: ok, rows: rows.map(({ number, state }) => ({ number, state })) });
     write(formatReport(rows));
     return exitCode(rows);
   } catch (e) {

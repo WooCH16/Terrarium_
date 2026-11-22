@@ -81,16 +81,34 @@ export function issueCriteria(body) {
 }
 
 // 근거 위치 칸에서 파일 경로로 보이는 것(백틱 안, 경로 구분자나 확장자가 있음)을 뽑는다. `:줄` 꼬리는 뗀다.
+// 빗금으로 끝나는 이름(폴더)은 몇째 줄이 근거인지 가리킬 수 없어 뽑지 않는다(결정 8-30, run-18 h24의 `.harness/`).
 export function evidencePaths(report) {
   const rows = readTable(report, REPORT_TABLE) ?? [];
   const out = new Set();
   for (const r of rows) {
     for (const m of String(r[2] ?? '').matchAll(/`([^`\s]+)`/g)) {
       const p = m[1].replace(/:\d+(?:[-:]\d+)?$/, '');
-      if (/^[\w.\-/]+$/.test(p) && !p.startsWith('/') && !p.includes('..') && (/\//.test(p) || /\.[A-Za-z0-9]{1,8}$/.test(p))) out.add(p);
+      if (p.endsWith('/')) continue;
+      // 글자는 한글 등 유니코드 글자도 받는다(`src/없는파일.mjs`처럼 지어낸 경로를 놓치지 않게).
+      // 다만 ASCII가 아닌 글자가 든 것은 확장자가 있어야 경로로 본다(`충족/미충족` 같은 말을 경로로 오해하지 않게).
+      if (/[^\x00-\x7F]/.test(p) && !/\.[A-Za-z0-9]{1,8}$/.test(p)) continue;
+      if (/^[\p{L}\p{N}_.\-/]+$/u.test(p) && !p.startsWith('/') && !p.includes('..') && (/\//.test(p) || /\.[A-Za-z0-9]{1,8}$/.test(p))) out.add(p);
     }
   }
   return [...out];
+}
+
+// 근거 이름 나누기(결정 8-30). fileExists(path): 보고서 커밋에 그 경로가 있는가. fileExists.byName(name): 커밋 안에 그 이름(마지막 조각)의 파일이 하나라도 있는가.
+// - 빗금이 있는 경로(`src/cli.mjs`)는 그 경로 그대로 있어야 한다. 없으면 missing.
+// - 빗금 없는 이름(`cli.mjs`, `memos.json`)은 커밋 안에서 같은 이름의 파일을 찾는다. 있으면 checked, 없으면 실행 중 생기는 파일·출력 이름으로 보고 skipped.
+//   byName이 없으면(찾을 수 없음) skipped.
+export function classifyEvidence(report, fileExists) {
+  const out = { checked: [], missing: [], skipped: [] };
+  for (const p of evidencePaths(report)) {
+    if (p.includes('/')) (fileExists(p) === false ? out.missing : out.checked).push(p);
+    else (typeof fileExists.byName === 'function' && fileExists.byName(p) === true ? out.checked : out.skipped).push(p);
+  }
+  return out;
 }
 
 // 보고서의 코드 검사. fileExists(path): 보고서 커밋에 그 파일이 있는가(모르면 null을 돌려 검사에서 뺀다).
@@ -109,7 +127,7 @@ export function reportProblems({ report, hash, criteria, fileExists }) {
     for (const c of criteria) if (!listed.has(norm(c))) problems.push(`보고서 표에 이슈의 기준이 그대로 없습니다: ${c}`);
   }
   if (fileExists) {
-    for (const p of evidencePaths(report)) if (fileExists(p) === false) problems.push(`근거 위치의 파일 \`${p}\`가 보고서 커밋에 없습니다.`);
+    for (const p of classifyEvidence(report, fileExists).missing) problems.push(`근거 위치의 파일 \`${p}\`가 보고서 커밋에 없습니다.`);
   }
   return problems;
 }
