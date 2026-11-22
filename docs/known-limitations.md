@@ -87,7 +87,9 @@ Terrarium 하네스 v0를 쓰기 전에 알아야 할 한계다(이슈 #31). 한
 
 ## 10. PR·CI·머지 트레인은 GitHub Actions (결정 8-32, `docs/adr/workflow.md`)
 
-- **진짜 Actions로는 아직 돌려 보지 않았다.** push-branch·run-train과 워크플로 틀은 가짜 gh(`harness/test/helpers/fake-gh-actions.mjs`)와 로컬 bare 원격으로만 시험했다(부록 B S1~S11, S14, S15). S12·S13(진짜 원격·진짜 Actions)은 소유자 승인 뒤 소유자의 비공개 시험 저장소로 한다. 그 전까지 아래 "확인 필요"는 확인되지 않았다.
+- **진짜 Actions로 한 번 돌렸다(run-19, 2026-11-22, 소유자의 비공개 시험 저장소, `docs/checks/runs.md`).** S12(이슈 PR·하달 PR·CI·트레인 머지·정리)와 S13(트레인 실패 때 `main` 그대로)이 통과했다. 아래 "확인 필요" 가운데 **확인됨**에 적은 것만 진짜로 봤다. 반려·강제 push·옛 PR 닫기처럼 재작업이 있어야 생기는 길은 그 실행에서 생기지 않아 아직 가짜 gh(`harness/test/helpers/fake-gh-actions.mjs`)로만 시험했다.
+  - **확인됨:** Actions 권한 API 필드(`default_workflow_permissions`, `can_approve_pull_request_reviews`)와 그 설정. push로 시작된 실행 안의 CI를 `push-branch`가 PR 검사로 읽었다(모두 통과로 읽음). `gh workflow run`으로 시작한 트레인을 찾아 결과 줄을 읽었다(실패·통과 둘 다). HTTPS 원격 push. 트레인이 `main`을 빨리감기하면 하달 PR은 "머지됨"으로 보인다. `GITHUB_TOKEN`으로 지운 브랜치는 `push` 워크플로를 다시 돌리지 않았다. 트레인 통과 뒤 원격에는 `main`만 남았다. 트레인 실패 때는 아무 브랜치도 지우지 않았다.
+  - **그 실행에서 보인 빈 곳(아직 안 고침):** (1) 트레인이 실패해도 코디네이터는 원인을 말하지 못한다(훅이 `gh run`을 막고, `run-train` 출력에 실패 단계의 기록이 없다). (2) 트레인 통과 뒤 원격 정리 결과(하달 PR 닫힘·브랜치 지움)를 `run-train` 출력이 알려 주지 않아 코디네이터가 확인하지 못한다. 둘 다 `run-train`이 실행 기록의 그 줄과 정리 결과를 읽어 출력에 넣으면 풀린다.
   - `gh pr checks --json name,bucket,state,link`의 필드와 종료 코드(실패 1, 진행 중 8), push로 시작된 워크플로의 검사가 같은 머리 커밋의 PR 검사로 보이는지.
   - `gh workflow run`이 실행 번호를 돌려주지 않는다고 보고 `run-name`의 요청 번호로 `gh run list`에서 찾는다. 결과는 `gh run view --log`의 `HARNESS_TRAIN_RESULT` 줄로 읽는다(실행 요약은 gh로 못 읽는다고 봤다).
   - `GET repos/<o>/<r>/actions/permissions/workflow`의 `default_workflow_permissions`, `can_approve_pull_request_reviews` 필드 이름. 저장소 설정 "Allow GitHub Actions to create and approve pull requests".
