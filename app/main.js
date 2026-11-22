@@ -139,7 +139,16 @@ ipcMain.handle('project:pick', async () => {
   return r.canceled ? null : fwd(r.filePaths[0]);
 });
 // 렌더러 입력에서는 세 값만 받는다(harnessDir·runsDir를 덮어쓰지 못하게, fable 조언 2).
-ipcMain.handle('install', (_e, input = {}) => install({ harnessDir, runsDir: runsDir(), exec, repo: input.repo, runName: input.runName, project: input.project }));
+// 지정 저장소가 없으면 만들지 여기서 묻는다(결정 8-28). 동의는 이 창의 단추로만 받는다(렌더러 입력으로는 만들기를 켤 수 없다). 기본 선택은 만들지 않음.
+ipcMain.handle('install', async (e, input = {}) => {
+  const base = { harnessDir, runsDir: runsDir(), exec, repo: input.repo, runName: input.runName, project: input.project };
+  const first = await install(base);
+  if (!first.missing) return first;
+  const parent = BrowserWindow.fromWebContents(e.sender) ?? win;
+  const c = await dialog.showMessageBox(parent, { type: 'question', buttons: ['비공개로 만들기', '취소'], defaultId: 1, cancelId: 1, message: `지정 저장소 ${input.repo}가 없습니다. 만들까요?`, detail: `gh repo create ${input.repo} --private 로 이 GitHub 계정에 비공개 저장소를 만든 뒤 설치를 이어 갑니다. 이슈, 제안문, 판정, 보고서, 기록 문서가 여기에 쌓입니다.` });
+  if (c.response !== 0) return { ok: false, error: `${first.error} 만들지 않았습니다. 저장소를 직접 만들거나 이름을 고친 뒤 다시 설치하세요.` };
+  return install({ ...base, createRepo: true });
+});
 function knownRuns() {
   const dir = runsDir();
   const own = existsSync(dir) ? readdirSync(dir).filter((n) => existsSync(`${dir}/${n}/harness.json`)).map((n) => `${dir}/${n}`) : [];

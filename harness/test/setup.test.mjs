@@ -136,11 +136,16 @@ import { mkdirSync, readdirSync, statSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
 // 가짜 gh: repo view는 FAKE_VIS를, repo clone은 FAKE_ORIGIN(로컬 bare 저장소)을 복제하고, label create는 FAKE_LOG에 적는다.
+// 결정 8-28: FAKE_MISSING이 있으면 repo create 전까지 repo view가 "찾을 수 없다"로 실패한다. repo create는 FAKE_CREATED 표시 파일을 만든다.
+// api user는 FAKE_LOGIN(기본 tester)을 낸다. 진짜 gh는 부르지 않는다.
 const FAKE_GH = `
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 const a = process.argv.slice(2);
 appendFileSync(process.env.FAKE_LOG, a.join(' ') + '\\n');
+if (a[0] === 'api' && a[1] === 'user') { process.stdout.write((process.env.FAKE_LOGIN ?? 'tester') + '\\n'); process.exit(0); }
+if (a[0] === 'repo' && a[1] === 'create') { writeFileSync(process.env.FAKE_CREATED, a[2]); process.exit(0); }
+if (a[0] === 'repo' && a[1] === 'view' && process.env.FAKE_MISSING && !existsSync(process.env.FAKE_CREATED)) { process.stderr.write("GraphQL: Could not resolve to a Repository with the name '" + a[2] + "'. (repository)\\n"); process.exit(1); }
 if (a[0] === 'repo' && a[1] === 'view') { process.stdout.write((process.env.FAKE_VIS ?? 'PRIVATE') + '\\n'); process.exit(process.env.FAKE_VIEW_FAIL ? 1 : 0); }
 if (a[0] === 'repo' && a[1] === 'clone') { execFileSync('git', ['clone', '-q', process.env.FAKE_ORIGIN, a[3]], { stdio: 'ignore' }); process.exit(0); }
 if (a[0] === 'label' && a[1] === 'create') process.exit(0);
@@ -157,7 +162,8 @@ function fakeGh() {
   spawnSync('git', ['init', '-q', '--bare', '-b', 'main', origin]);
   const log = join(dir, 'calls.log');
   writeFileSync(log, '');
-  return { dir, origin, log, env: { ...process.env, HARNESS_GH_BIN: bin, FAKE_LOG: log, FAKE_ORIGIN: origin } };
+  const created = join(dir, 'created');
+  return { dir, origin, log, created, env: { ...process.env, HARNESS_GH_BIN: bin, FAKE_LOG: log, FAKE_ORIGIN: origin, FAKE_CREATED: created } };
 }
 const setupWith = (run, extra, env) => spawnSync(process.execPath, [join(harnessDir, 'setup.mjs'), '--run', run, '--repo', REPO, ...extra], { encoding: 'utf8', env });
 const walk = (dir, base = dir, out = {}) => {
@@ -273,6 +279,99 @@ test('T3: 비어 있지 않은 실행 폴더에는 설치하지 않는다(종료
   const r = setupWith(run, ['--no-clone'], process.env);
   assert.equal(r.status, 1);
   assert.deepEqual(walk(run), before);
+});
+
+// ---------- 결정 8-28: --create-repo. 모든 시험이 가짜 gh만 쓴다(진짜 저장소를 만들지 않는다) ----------
+const setupGh = (run, args, env) => spawnSync(process.execPath, [join(harnessDir, 'setup.mjs'), '--run', run, ...args], { encoding: 'utf8', env });
+const calls = (g) => readFileSync(g.log, 'utf8').split('\n').filter(Boolean);
+
+test('8-28 (a): --repo 없이 --create-repo면 로그인 계정으로 <login>/harness-issues를 쓴다', () => {
+  const g = fakeGh();
+  const run = freshRun();
+  const r = setupGh(run, ['--create-repo'], { ...g.env, FAKE_LOGIN: 'tester' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(readFileSync(join(run, 'harness.json'), 'utf8')).designatedRepo, 'tester/harness-issues');
+  assert.equal(calls(g)[0], 'api user --jq .login');
+  assert.equal(calls(g)[1], 'repo view tester/harness-issues --json visibility -q .visibility');
+  assert.ok(!calls(g).some((c) => c.startsWith('repo create')), '이미 있으면 만들지 않는다');
+  // 기본 이름도 setup의 owner/name 형식 검사를 받는다: 로그인 값이 이상하면 아무것도 쓰지 않는다
+  const g2 = fakeGh();
+  const parent = mkdtempSync(join(tmpdir(), 'setup-'));
+  const bad = setupGh(join(parent, 'run'), ['--create-repo'], { ...g2.env, FAKE_LOGIN: 'a b' });
+  assert.equal(bad.status, 1, bad.stderr);
+  assert.match(bad.stderr, /owner\/name 형식이 아니다/);
+  assert.deepEqual(readdirSync(parent), []);
+  assert.deepEqual(calls(g2), ['api user --jq .login'], 'repo view·create를 부르지 않는다');
+});
+
+test('8-28 (b): 없는 저장소를 --create-repo로 비공개로 만들고 비공개 확인·클론·라벨을 이어 간다', () => {
+  const g = fakeGh();
+  const run = freshRun();
+  const r = setupGh(run, ['--repo', REPO, '--create-repo'], { ...g.env, FAKE_MISSING: '1' });
+  assert.equal(r.status, 0, r.stderr);
+  const c = calls(g);
+  assert.equal(c[0], `repo view ${REPO} --json visibility -q .visibility`);
+  assert.equal(c[1], `repo create ${REPO} --private`);
+  assert.equal(c[2], `repo view ${REPO} --json visibility -q .visibility`, '만든 뒤 다시 비공개를 확인한다');
+  assert.match(c[3], /^repo clone /);
+  assert.ok(c.some((l) => l.startsWith('label create ')));
+  assert.equal(c.filter((l) => l.startsWith('repo create')).length, 1);
+  assert.match(r.stdout, /비공개로 만들었다/);
+  assert.ok(existsSync(join(run, 'issues', '.git')));
+});
+
+test('8-28 (c): 저장소가 이미 있으면 --create-repo여도 만들지 않고 지금 흐름 그대로다', () => {
+  const g = fakeGh();
+  const run = freshRun();
+  const r = setupGh(run, ['--repo', REPO, '--create-repo'], { ...g.env, FAKE_VIS: 'PRIVATE' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!calls(g).some((l) => l.startsWith('repo create')));
+  assert.doesNotMatch(r.stdout, /비공개로 만들었다/);
+});
+
+test('8-28 (d): 공개 저장소면 --create-repo여도 멈추고(종료 코드 2) 만들거나 고치지 않는다', () => {
+  const g = fakeGh();
+  const parent = mkdtempSync(join(tmpdir(), 'setup-'));
+  const r = setupGh(join(parent, 'run'), ['--repo', REPO, '--create-repo'], { ...g.env, FAKE_VIS: 'PUBLIC' });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /PRIVATE가 아니다/);
+  assert.deepEqual(calls(g), [`repo view ${REPO} --json visibility -q .visibility`], 'repo view 한 번뿐이다(create·edit·delete 없음)');
+  assert.deepEqual(readdirSync(parent), []);
+});
+
+test('8-28 (e): --create-repo 없이 저장소가 없으면 멈추고 --create-repo를 알려 준다. 찾을 수 없다는 답이 아닌 실패는 깃발이 있어도 만들지 않는다', () => {
+  const g = fakeGh();
+  const parent = mkdtempSync(join(tmpdir(), 'setup-'));
+  const r = setupGh(join(parent, 'run'), ['--repo', REPO], { ...g.env, FAKE_MISSING: '1' });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /없다/);
+  assert.match(r.stderr, /--create-repo/);
+  assert.match(r.stderr, new RegExp(`gh repo create ${REPO} --private`));
+  assert.ok(!calls(g).some((l) => l.startsWith('repo create')));
+  assert.deepEqual(readdirSync(parent), []);
+
+  const g2 = fakeGh();
+  const parent2 = mkdtempSync(join(tmpdir(), 'setup-'));
+  const r2 = setupGh(join(parent2, 'run'), ['--repo', REPO, '--create-repo'], { ...g2.env, FAKE_VIEW_FAIL: '1' });
+  assert.equal(r2.status, 2, r2.stderr);
+  assert.match(r2.stderr, /확인하지 못해/);
+  assert.ok(!calls(g2).some((l) => l.startsWith('repo create')));
+  assert.deepEqual(readdirSync(parent2), []);
+});
+
+test('8-28 (f): --create-repo는 --refresh·--no-clone과 함께 쓰면 gh를 부르지 않고 거부한다(종료 코드 1)', () => {
+  const run = runSetup();
+  const before = hashTree(run);
+  for (const extra of [['--refresh'], ['--no-clone']]) {
+    const g = fakeGh();
+    const target = extra[0] === '--refresh' ? run : freshRun();
+    const r = setupGh(target, ['--repo', REPO, '--create-repo', ...extra], g.env);
+    assert.equal(r.status, 1, `${extra}: ${r.stderr}`);
+    assert.match(r.stderr, /--create-repo는/);
+    assert.deepEqual(calls(g), [], `${extra}: gh 호출 없음`);
+    if (extra[0] === '--refresh') assert.deepEqual(hashTree(run), before);
+    else assert.ok(!existsSync(target));
+  }
 });
 
 // 이슈 #19: --project로 자기 대상 프로젝트를 지정한다.

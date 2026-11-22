@@ -75,3 +75,24 @@ test('패널(결정 8-26): 교환 단계는 자기 초안을 추천하지 못하
   assert.match(read('../coordinator/AGENT.md'), /자기 초안은 추천하지 못한다/);
   assert.match(read('../../docs/checks/owner-decisions.md'), /^\| 8-26 \| 패널 자기 추천 금지 \|/m);
 });
+
+test('결정 8-27: 주관적 지시는 대리 기준으로 바꾸고 원래 목표는 전제·위험에 적는다고 정의·스킬·문서가 같게 말한다', () => {
+  const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), 'utf8');
+  // 규칙 원문은 정의의 "제안문 양식" 절(양식 블록 밖의 기준 규칙)에 있다
+  const form = text.slice(text.indexOf('## 제안문 양식'), text.indexOf('## 하지 않는 것'));
+  const rules = form.slice(form.lastIndexOf('```') + 3);
+  assert.match(rules, /주관적 목표는 대리 기준으로 바꾼다\(결정 8-27\)/);
+  assert.match(rules, /완료 기준에 넣지 않고/);
+  assert.match(rules, /"전제·위험"에 `원래 목표/);
+  assert.match(rules, /충족 여부는 사용자가 결과를 보고 판단한다/);
+  assert.match(rules, /지시에 없는 일을 새로 더하지 않는다/);
+  assert.doesNotMatch(/```markdown\r?\n([\s\S]*?)```/.exec(text)[1], /대리 기준/, '양식 블록은 바꾸지 않는다(코드가 검사)');
+  const proposal = read('../advisor/skills/advisor-proposal/SKILL.md');
+  assert.match(proposal, /대리 기준/);
+  assert.match(proposal, /"전제·위험"에 원래 목표/);
+  assert.match(proposal, /결정 8-27/);
+  const panel = read('../advisor/skills/advisor-panel/SKILL.md');
+  assert.match(panel, /\| c \|[^\n]*대리 기준[^\n]*8-27/);
+  assert.match(read('../../docs/advisor.md'), /주관적 지시의 완료 기준\(결정 8-27\)/);
+  assert.match(read('../../docs/checks/owner-decisions.md'), /^\| 8-27 \| 주관적 지시의 완료 기준 \|.*\| 2026-11-22 대화, run-18 h22 \|/m);
+});

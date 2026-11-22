@@ -21,6 +21,17 @@ Terrarium은 Claude Code 에이전트를 계층으로 나눠 일을 맡기는 �
 - **필요한 계정:** GitHub(`gh` 로그인, 비공개 지정 저장소), Claude Code 로그인, 워커 모델 1곳 이상(Pi의 Anthropic 로그인이나 Gemini API 키 등), TypeSafe Jev 키(`TYPESAFE_API_KEY`).
 - 받기 전에 [알려진 한계](docs/known-limitations.md)를 읽으세요. 워커에는 OS 샌드박스가 없고, 같은 `gh` 계정으로 판정을 꾸밀 수 있습니다.
 
+## 먼저 필요한 것: 비공개 지정 저장소
+
+이 하네스를 쓰려면 **사용자마다 자기 비공개 GitHub 저장소(지정 저장소)가 하나 필요합니다.** 하네스는 이 저장소 없이 돌지 않습니다.
+
+- **담는 것:** 작업 이슈, 어드바이저 제안문, 리뷰어 판정, 오퍼레이터 결과 보고서, 기록 문서(`records/`).
+- **비공개여야 하는 이유:** 지시 원문과 대상 프로젝트의 내용이 그대로 쌓입니다. 공개 저장소면 `setup`, `preflight`, 코디네이터가 멈추고 아무것도 쓰지 않습니다.
+- **혼자 씁니다:** 여러 사람이 한 저장소를 같이 쓰지 않습니다. 대상 프로젝트마다 따로 만드는 것이 좋습니다(같은 저장소를 다시 쓰면 기록이 어긋나 보입니다).
+- **만드는 방법(둘 중 하나):**
+  - 직접: `gh repo create <owner>/harness-issues --private`
+  - 설치할 때: `node harness/setup.mjs --run <실행 폴더> --create-repo` (`--repo`를 주지 않으면 로그인 계정의 `harness-issues`. 두 번째 대상 프로젝트부터는 `--repo`로 다른 이름을 줍니다). 저장소가 없을 때만 비공개로 만들고, 이미 공개인 저장소는 바꾸지 않고 멈춥니다. 앱의 설치 화면은 저장소가 없으면 만들지 묻습니다.
+
 ## 쓰는 방법: 앱 버전과 Claude CLI 버전
 
 하네스를 쓰는 방법은 두 가지입니다. 어느 쪽이든 코디네이터는 실행 폴더에서 도는 같은 대화형 Claude Code 세션입니다. 같은 규칙(`CLAUDE.md`)과 같은 훅을 쓰므로 하는 일은 같습니다. 다른 것은 창과 준비 과정뿐입니다.
@@ -51,7 +62,7 @@ npm run dist         # Windows 설치 파일: app/dist/Terrarium Setup <버전>.
 처음 쓸 때 순서:
 
 1. 메뉴 **[설정 > 계정]**: 로그인 창 단추로 Claude Code, GitHub, Pi에 로그인합니다. API 키를 넣고, 지정 저장소(`<소유자>/<이름>`)를 적어 **사전 점검**을 누릅니다. 점검을 통과해야 코디네이터 터미널이 뜹니다.
-2. 메뉴 **[설정 > 실행 폴더 설치]**: 지정 저장소, 실행 폴더 이름, 대상 프로젝트(main 브랜치가 있는 git 폴더, 비우면 시험용 메모 프로그램)를 넣고 **설치**를 누릅니다.
+2. 메뉴 **[설정 > 실행 폴더 설치]**: 지정 저장소, 실행 폴더 이름, 대상 프로젝트(main 브랜치가 있는 git 폴더, 비우면 시험용 메모 프로그램)를 넣고 **설치**를 누릅니다. 지정 저장소가 없으면 비공개로 만들지 묻습니다(1번 점검이 저장소가 없어 실패했다면, 만든 뒤 사전 점검을 다시 누릅니다).
 3. 본창의 **ORCHESTRA 칸**: 터미널이 뜨면 코디네이터에게 바로 말합니다. 처음에는 폴더 신뢰 질문이 나옵니다. **기본 선택이 "No"라서 Enter만 누르면 No가 됩니다. 아래 화살표로 "Yes, I trust this folder"를 고른 뒤 Enter를 누르세요.** No면 허용 목록이 적용되지 않고, 하네스 훅도 돌지 않을 수 있습니다.
    - Esc로 턴을 끊고, `/compact` 같은 Claude Code 명령을 그대로 씁니다. 하달이 도는 중에 Esc를 눌러도 하달은 계속 돌고, 다음 턴에 코디네이터가 이어서 기다립니다. 하달을 멈추려면 Esc가 아니라 코디네이터에게 멈춰 달라고 말합니다(`stop-operator`).
    - 코디네이터가 끝나면 터미널에서 Enter를 누르면 이어서 다시 열리고, N을 누르면 새 대화가 열립니다.
@@ -71,9 +82,12 @@ npm run dist         # Windows 설치 파일: app/dist/Terrarium Setup <버전>.
 # 2. 비공개 지정 저장소를 만들고 사전 점검
 gh repo create <owner>/harness-issues --private
 node harness/preflight.mjs --repo <owner>/harness-issues
+#    3번에서 --create-repo로 만들 거라면 저장소가 아직 없으니 --repo 없이 점검합니다
+#    node harness/preflight.mjs
 
 # 3. 실행 폴더 설치 (대상 프로젝트를 주지 않으면 시험용 메모 프로그램)
 node harness/setup.mjs --run C:/Users/<you>/my-run --repo <owner>/harness-issues --project C:/path/to/your/git/project
+#    2번에서 저장소를 만들지 않았다면 --create-repo를 붙입니다(없을 때만 비공개로 만듦)
 
 # 4. 실행: 실행 폴더에서 코디네이터를 띄웁니다(앱이 띄우는 것과 같은 설정)
 cd C:/Users/<you>/my-run

@@ -60,7 +60,8 @@ export function runPreflight(opts = {}, deps = {}) {
       ok = vis === 'PRIVATE';
       detail = vis ?? (firstLine(v.stderr) || '확인하지 못함');
     }
-    add({ id: 'repo', label: `지정 저장소 ${opts.repo} 비공개`, ok, detail, fix: '비공개 저장소를 지정하세요(gh repo create <owner>/<name> --private)' });
+    // 결정 8-28: 저장소가 없을 때만 setup --create-repo가 만들어 준다. 공개 저장소는 고쳐 주지 않는다.
+    add({ id: 'repo', label: `지정 저장소 ${opts.repo} 비공개`, ok, detail, fix: `비공개 저장소를 지정하세요. 저장소가 없으면 gh repo create ${opts.repo} --private로 만들거나, setup.mjs에 --create-repo를 붙이면 비공개로 만들어 줍니다. 이미 공개인 저장소는 만들어 주지 않으니 다른 비공개 저장소를 지정하세요` });
   }
 
   // 코디네이터·오퍼레이터 세션은 Claude Code다. 하네스는 셸 없이 띄우므로 HARNESS_CLAUDE_BIN을 쓴다면 .exe나 .js여야 한다(.cmd 불가).

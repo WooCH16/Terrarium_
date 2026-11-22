@@ -10,21 +10,29 @@ export function checkInstallInput({ repo, runName, project }) {
   return null;
 }
 
+// gh가 "찾을 수 없다"고 답한 경우만 없는 저장소로 본다(setup.mjs와 같은 기준, 결정 8-28). 로그인·네트워크 실패는 여기 들지 않는다.
+const NOT_FOUND = /Could not resolve to a Repository/i;
+
 export async function repoVisibility(repo, exec) {
   const r = await exec('gh', ['repo', 'view', repo, '--json', 'visibility', '-q', '.visibility'], {});
-  if (r.status !== 0) return { ok: false, error: `저장소를 읽지 못했습니다: ${String(r.stderr || r.error || '').trim().slice(0, 200)}` };
+  if (r.status !== 0) {
+    const why = String(r.stderr || r.error || '').trim();
+    if (NOT_FOUND.test(why)) return { ok: false, missing: true, error: `지정 저장소 ${repo}가 없습니다.` };
+    return { ok: false, error: `저장소를 읽지 못했습니다: ${why.slice(0, 200)}` };
+  }
   return { ok: true, visibility: String(r.stdout).trim() };
 }
 
-// 성공이면 { ok: true, run, output }, 아니면 { ok: false, error }.
-export async function install({ harnessDir, runsDir, repo, runName, project, exec }) {
+// 성공이면 { ok: true, run, output }, 아니면 { ok: false, error, missing? }.
+// createRepo: 사용자가 "없으면 만들까요?"에 동의했을 때만 true. 저장소가 없을 때 setup.mjs에 --create-repo를 넘긴다(결정 8-28).
+export async function install({ harnessDir, runsDir, repo, runName, project, createRepo = false, exec }) {
   const bad = checkInstallInput({ repo, runName, project });
   if (bad) return { ok: false, error: bad };
   const v = await repoVisibility(repo, exec);
-  if (!v.ok) return v;
-  if (v.visibility !== 'PRIVATE') return { ok: false, error: `지정 저장소 ${repo}가 비공개가 아닙니다(${v.visibility}). 하네스는 비공개 저장소에만 씁니다. 저장소를 비공개로 바꾸거나 다른 저장소를 고르세요.` };
+  if (!v.ok && !(v.missing && createRepo === true)) return v;
+  if (v.ok && v.visibility !== 'PRIVATE') return { ok: false, error: `지정 저장소 ${repo}가 비공개가 아닙니다(${v.visibility}). 하네스는 비공개 저장소에만 씁니다. 저장소를 비공개로 바꾸거나 다른 저장소를 고르세요.` };
   const run = `${runsDir.replace(/\\/g, '/')}/${runName}`;
-  const args = [`${harnessDir}/setup.mjs`, '--run', run, '--repo', repo, ...(project ? ['--project', project] : [])];
+  const args = [`${harnessDir}/setup.mjs`, '--run', run, '--repo', repo, ...(project ? ['--project', project] : []), ...(v.missing ? ['--create-repo'] : [])];
   const r = await exec('node', args, { timeout: 300000 });
   const output = `${r.stdout ?? ''}${r.stderr ?? ''}`.trim();
   if (r.status !== 0) return { ok: false, error: `setup.mjs가 실패했습니다(종료 코드 ${r.status}).`, output };

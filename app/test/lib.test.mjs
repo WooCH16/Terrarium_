@@ -147,6 +147,30 @@ test('설치: 비공개가 아닌 저장소는 setup을 부르지 않고 막는�
   assert.match(checkInstallInput({ repo: 'nope', runName: 'a' }), /소유자/);
 });
 
+test('설치(결정 8-28): 저장소가 없으면 동의(createRepo) 없이는 setup을 부르지 않고 missing을 알린다. 동의하면 --create-repo를 넘긴다. 다른 실패는 동의가 있어도 막는다', async () => {
+  const calls = [];
+  const exec = (view) => (bin, args) => { calls.push([bin, ...args]); return bin === 'gh' ? view : { status: 0, stdout: '실행 폴더 준비 완료' }; };
+  const missingView = { status: 1, stdout: '', stderr: "GraphQL: Could not resolve to a Repository with the name 'o/r'. (repository)\n" };
+  const base = { harnessDir: 'C:/h', runsDir: 'C:/d/runs', repo: 'o/r', runName: 'p1' };
+  const ask = await install({ ...base, exec: exec(missingView) });
+  assert.equal(ask.ok, false);
+  assert.equal(ask.missing, true);
+  assert.match(ask.error, /없습니다/);
+  assert.equal(calls.filter((c) => c[0] === 'node').length, 0, '동의 전에는 setup을 부르지 않는다');
+  const yes = await install({ ...base, createRepo: true, exec: exec(missingView) });
+  assert.equal(yes.ok, true);
+  assert.deepEqual(calls.at(-1), ['node', 'C:/h/setup.mjs', '--run', 'C:/d/runs/p1', '--repo', 'o/r', '--create-repo']);
+  calls.length = 0;
+  const auth = await install({ ...base, createRepo: true, exec: exec({ status: 1, stdout: '', stderr: 'gh auth login 필요\n' }) });
+  assert.equal(auth.ok, false);
+  assert.ok(!auth.missing);
+  assert.equal(calls.filter((c) => c[0] === 'node').length, 0, '찾을 수 없다는 답이 아니면 만들지 않는다');
+  // 이미 비공개로 있으면 동의가 있어도 --create-repo를 넘기지 않는다
+  const exists = await install({ ...base, createRepo: true, exec: exec({ status: 0, stdout: 'PRIVATE\n' }) });
+  assert.equal(exists.ok, true);
+  assert.ok(!calls.at(-1).includes('--create-repo'));
+});
+
 test('관제탑: 최근 하달이 카드 자리에, 맡은 이슈가 워커로, 라벨이 단계로 들어간다', async () => {
   const run = tmp();
   writeFileSync(`${run}/harness.json`, JSON.stringify({ designatedRepo: 'o/r' }));

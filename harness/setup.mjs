@@ -1,4 +1,6 @@
-// 실행 폴더를 만든다: node setup.mjs --run <dir> --repo <owner/name> [--project <git 폴더>] [--no-clone | --refresh] [--advisor-stub]
+// 실행 폴더를 만든다: node setup.mjs --run <dir> (--repo <owner/name> | --create-repo) [--project <git 폴더>] [--no-clone | --refresh] [--advisor-stub]
+//   --create-repo: 지정 저장소가 없으면 비공개로 만든다(결정 8-28). 이 깃발이 만들기 동의다. --repo가 없으면 <로그인 계정>/harness-issues.
+//                  이미 있으면 만들지 않는다. 공개 저장소를 비공개로 바꾸거나 지우지 않는다. --no-clone·--refresh와 함께 쓸 수 없다
 //   --project: 대상 프로젝트로 쓸 로컬 git 저장소(main 브랜치 필요). 실행 폴더에 복제하고 원래 저장소와의 연결(origin)은 끊는다.
 //              없으면 시험용 메모 프로그램(fixtures/memo)을 쓴다
 //   --no-clone: 지정 저장소에 접속하지 않고 빈 저장소로 클론 자리를 만든다(시험용)
@@ -34,19 +36,31 @@ function gh(args, options = {}) {
 }
 
 const runArg = arg('--run');
-const repo = arg('--repo');
+let repo = arg('--repo');
 const noClone = process.argv.includes('--no-clone');
 const refresh = process.argv.includes('--refresh'); // 역할 파일(CLAUDE.md, agents, settings)만 다시 쓴다
 const advisorStub = process.argv.includes('--advisor-stub');
+const createRepo = process.argv.includes('--create-repo'); // 지정 저장소가 없으면 만든다(결정 8-28)
 const projectArg = arg('--project');
-const USAGE = 'usage: node setup.mjs --run <dir> --repo <owner/name> [--project <git 폴더>] [--no-clone | --refresh] [--advisor-stub]';
+const USAGE = 'usage: node setup.mjs --run <dir> (--repo <owner/name> | --create-repo) [--project <git 폴더>] [--no-clone | --refresh] [--advisor-stub]';
 if (!runArg || (process.argv.includes('--project') && !projectArg)) {
   console.error(USAGE);
+  process.exit(1);
+}
+if (createRepo && (refresh || noClone)) {
+  console.error(USAGE);
+  console.error(`--create-repo는 ${refresh ? '--refresh' : '--no-clone'}와 함께 쓸 수 없다(지정 저장소에 접속하지 않으므로 만들 일이 없다). 아무것도 쓰지 않고 멈춘다.`);
   process.exit(1);
 }
 // 지정 저장소 이름은 owner/name 한 꼴만 받는다. `--repo undefined`가 harness.json을 덮은 일이 있었다(run-18).
 const REPO_FORMAT = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const validRepo = (v) => typeof v === 'string' && REPO_FORMAT.test(v) && !/\.git$/i.test(v);
+// --create-repo에 --repo가 없으면 로그인 계정의 harness-issues를 쓴다. 이 이름도 아래 형식 검사를 그대로 받는다.
+if (createRepo && !process.argv.includes('--repo')) {
+  let login = '';
+  try { login = gh(['api', 'user', '--jq', '.login']).trim(); } catch (e) { stop(`로그인 계정을 읽지 못해 기본 지정 저장소 이름을 정할 수 없다. --repo <owner/name>을 주거나 gh auth login을 하라. 아무것도 쓰지 않고 멈춘다: ${String(e.message).split('\n')[0]}`); }
+  repo = `${login}/harness-issues`;
+}
 if (!validRepo(repo)) {
   console.error(USAGE);
   console.error(`--repo 값 ${repo === undefined ? '(없음)' : JSON.stringify(repo)}은 owner/name 형식이 아니다(영문자·숫자·-_. 만, 빗금 하나, 양쪽 비어 있지 않음, .git 끝 없음). 아무것도 쓰지 않고 멈춘다.`);
@@ -78,12 +92,20 @@ if (projectArg) {
 }
 
 // 1. 아무것도 쓰기 전에 지정 저장소가 비공개인지 확인한다. 확인하지 못해도 막는다(닫힌 쪽).
+//    --create-repo가 있고 gh가 "찾을 수 없다"고 답했을 때만 비공개로 만들고 다시 확인한다(결정 8-28). 다른 실패는 만들지 않고 멈춘다.
+const NOT_FOUND = /Could not resolve to a Repository/i;
 if (!noClone && !refresh) {
+  const view = () => gh(['repo', 'view', repo, '--json', 'visibility', '-q', '.visibility']).trim();
   let visibility;
   try {
-    visibility = gh(['repo', 'view', repo, '--json', 'visibility', '-q', '.visibility']).trim();
+    visibility = view();
   } catch (e) {
-    stop(`지정 저장소의 공개 여부를 확인하지 못해 아무것도 쓰지 않고 멈춘다: ${String(e.message).split('\n')[0]}`);
+    const why = `${e.stderr ?? ''}\n${e.message ?? ''}`;
+    if (!NOT_FOUND.test(why)) stop(`지정 저장소의 공개 여부를 확인하지 못해 아무것도 쓰지 않고 멈춘다: ${String(e.message).split('\n')[0]}`);
+    if (!createRepo) stop(`지정 저장소 ${repo}가 없다. 아무것도 쓰지 않고 멈춘다. gh repo create ${repo} --private로 만들거나, setup에 --create-repo를 붙이면 비공개로 만들어 준다.`);
+    try { gh(['repo', 'create', repo, '--private']); } catch (e2) { stop(`지정 저장소 ${repo}를 만들지 못해 아무것도 쓰지 않고 멈춘다: ${String(e2.message).split('\n')[0]}`); }
+    console.log(`지정 저장소를 비공개로 만들었다: ${repo}`);
+    try { visibility = view(); } catch (e3) { stop(`만든 지정 저장소의 공개 여부를 확인하지 못해 더 쓰지 않고 멈춘다: ${String(e3.message).split('\n')[0]}`); }
   }
   if (visibility !== 'PRIVATE') stop(`지정 저장소 ${repo}가 PRIVATE가 아니다(${JSON.stringify(visibility)}). 아무것도 쓰지 않고 멈춘다. 비공개 저장소를 지정하라.`);
 }

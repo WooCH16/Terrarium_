@@ -80,6 +80,12 @@ test('#21: --repo는 지정 저장소가 PRIVATE일 때만 통과한다', () => 
   const missing = runPreflight({ repo: 'owner/x' }, deps({ out: { 'gh repo view owner/x --json visibility -q .visibility': { status: 1, stdout: '', stderr: 'Could not resolve\n' } } }));
   assert.equal(byId(missing, 'repo').ok, false);
   assert.equal(byId(missing, 'repo').detail, 'Could not resolve');
+  // 결정 8-28: 없으면 setup --create-repo가 만들어 준다고 알리고, 공개 저장소는 만들어 주지 않는다고 따로 적는다
+  const fix = byId(missing, 'repo').fix;
+  assert.match(fix, /gh repo create owner\/x --private/);
+  assert.match(fix, /--create-repo/);
+  assert.match(fix, /저장소가 없으면/);
+  assert.match(fix, /공개인 저장소는 만들어 주지 않으니/);
 });
 
 test('#21: HARNESS_CLAUDE_BIN이 .cmd이면 실패하고 .exe면 통과한다(Windows npm 셔틀 문제)', () => {

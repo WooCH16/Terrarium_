@@ -21,6 +21,17 @@ Results flow upward: operator report → reviewer verdict → coordinator check 
 - **Accounts you need:** GitHub (`gh` logged in, a private designated repository), Claude Code (logged in), at least one worker model provider (for example Pi's Anthropic login or a Gemini API key), and a TypeSafe Jev key (`TYPESAFE_API_KEY`).
 - Read the [known limitations](docs/known-limitations.md) (Korean) first. Workers have no OS sandbox, and anyone using the same `gh` account can forge a verdict.
 
+## What you need first: a private designated repository
+
+To use this harness, **each user needs their own private GitHub repository (the designated repository).** The harness does not run without it.
+
+- **What it holds:** work issues, advisor proposals, reviewer verdicts, operator result reports, and record documents (`records/`).
+- **Why it must be private:** your instructions and the target project's content pile up there as written. If the repository is public, `setup`, `preflight`, and the coordinator stop and write nothing.
+- **One user only:** several people do not share one repository. A separate one per target project is best (reusing one makes the records look mixed up).
+- **Two ways to create it:**
+  - Yourself: `gh repo create <owner>/harness-issues --private`
+  - During setup: `node harness/setup.mjs --run <run folder> --create-repo` (without `--repo`, it uses `harness-issues` under your logged-in account; from the second target project on, give `--repo` a different name). It creates a private repository only when none exists; an existing public repository is left unchanged and setup stops. The app's install screen asks before creating a missing repository.
+
 ## Two ways to use it: the app and the Claude CLI
 
 There are two ways to use the harness. Either way, the coordinator is the same interactive Claude Code session running in a run folder. It uses the same rules (`CLAUDE.md`) and the same hooks, so it does the same work. Only the window and the setup steps differ.
@@ -51,7 +62,7 @@ npm run dist         # Windows installer: app/dist/Terrarium Setup <version>.exe
 First use:
 
 1. **[설정 > 계정]** (Settings > Accounts): log in to Claude Code, GitHub, and Pi with the login buttons. Enter API keys, type the designated repository (`<owner>/<name>`), and press **사전 점검** (preflight check). The coordinator terminal opens only after this check passes.
-2. **[설정 > 실행 폴더 설치]** (Settings > Run folder setup): enter the designated repository, a run folder name, and the target project (a git folder with a `main` branch; leave empty for the sample memo program), then press **설치** (Install).
+2. **[설정 > 실행 폴더 설치]** (Settings > Run folder setup): enter the designated repository, a run folder name, and the target project (a git folder with a `main` branch; leave empty for the sample memo program), then press **설치** (Install). If the designated repository does not exist, the app asks whether to create it as private (if the step 1 check failed because the repository was missing, press the preflight check again after it is created).
 3. **ORCHESTRA pane** in the main window: when the terminal appears, talk to the coordinator. The first time, Claude Code asks whether you trust the folder. **The default selection is "No", so pressing Enter alone chooses No. Move down to "Yes, I trust this folder" and press Enter.** With No, the allow list does not apply and the harness hooks may not run.
    - Esc interrupts a turn, and Claude Code commands such as `/compact` work as usual. Pressing Esc while a handoff is running does not stop the handoff; on the next turn the coordinator picks it up again. To stop a handoff, ask the coordinator to stop it (`stop-operator`), not Esc.
    - When the coordinator exits, press Enter in the terminal to reopen the same conversation, or N for a new one.
@@ -71,9 +82,12 @@ Run the scripts in a terminal yourself, then start `claude` in the run folder an
 # 2. Create a private designated repository and run the preflight check
 gh repo create <owner>/harness-issues --private
 node harness/preflight.mjs --repo <owner>/harness-issues
+#    If you will create it with --create-repo in step 3, the repository does not exist yet, so check without --repo
+#    node harness/preflight.mjs
 
 # 3. Set up a run folder (without a target project, the sample memo program is used)
 node harness/setup.mjs --run C:/Users/<you>/my-run --repo <owner>/harness-issues --project C:/path/to/your/git/project
+#    If you did not create the repository in step 2, add --create-repo (it creates a private one only when none exists)
 
 # 4. Run: start the coordinator in the run folder (same settings the app uses)
 cd C:/Users/<you>/my-run
