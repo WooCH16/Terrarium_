@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import {
   collectAllowed, excludeDependents, orderAllowed, parseDependsOn, enqueue, land, selectAdapter,
   createLocalSequential, createGithubQueue, runNodeTests, IntegrityError, StoppedError, acquireLock,
-  normalizeRestComments, parsePaginated, makeFetchIssueData, isAnc, verifyChain,
+  normalizeRestComments, parsePaginated, makeFetchIssueData, isAnc, verifyChain, markedPids,
 } from '../operator/merge-adapter.mjs';
 import { main as enqueueMain } from '../operator/merge-adapter-enqueue.mjs';
 import { main as landMain } from '../operator/merge-adapter-land.mjs';
@@ -1347,6 +1347,22 @@ test('시험이 남긴 분리된 자손 프로세스는 시험이 끝나면 정�
   assert.equal(res.results[0].status, 'merged');
   await new Promise((r) => setTimeout(r, 4500));
   assert.equal(existsSync(marker), false);
+});
+
+test('markedPids: /proc에서 이 실행의 표지를 가진 프로세스만 고른다(자기 자신, 다른 표지, 숫자 아닌 이름은 뺀다)', () => {
+  const proc = mkdtempSync(join(tmpdir(), 'fakeproc-'));
+  try {
+    const put = (pid, env) => { mkdirSync(join(proc, pid)); writeFileSync(join(proc, pid, 'environ'), env.join('\0') + '\0'); };
+    put('101', ['HOME=/x', 'HARNESS_TEST_SWEEP=abc']);
+    put('102', ['HARNESS_TEST_SWEEP=other']);
+    put('103', ['HARNESS_TEST_SWEEP=abcd']);
+    put('104', ['HARNESS_TEST_SWEEP=abc']);
+    put('self', ['HARNESS_TEST_SWEEP=abc']);
+    mkdirSync(join(proc, '105'));
+    assert.deepEqual(markedPids('abc', { procDir: proc, self: 104 }).sort(), [101]);
+    assert.deepEqual(markedPids('', { procDir: proc }), []);
+    assert.deepEqual(markedPids('abc', { procDir: join(proc, 'none') }), []);
+  } finally { rmSync(proc, { recursive: true, force: true }); }
 });
 
 test('시험 프로세스의 TEMP·TMP·TMPDIR·HOME은 하달 이름 공간 안의 시험 전용 폴더다', T, async () => {
