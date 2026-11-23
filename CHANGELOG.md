@@ -6,6 +6,8 @@
 
 ## [0.2.0-beta.1] - 2026-11-24 (미리보기, beta 브랜치)
 
+릴리스 노트: [docs/releases/v0.2.0-beta.1.md](docs/releases/v0.2.0-beta.1.md).
+
 ### 바뀜
 
 - **앱 관제탑 화면을 새 디자인으로 교체(`app/tower/`).** 캔버스 위 가운데 코디네이터 창에 진짜 Claude Code 코디네이터 터미널이 뜨고, 코디네이터가 실제로 부른 세션만 둘레에 창으로 뜹니다: 어드바이저, 하달 한 번당 오퍼레이터(팀 이름), 그 하달에서 워커를 부른 이슈당 워커. 하달하지 않은 팀이나 하달에 없는 이슈는 뜨지 않습니다. 화면은 실행 폴더의 기록(`guard.log`, `advice-log.jsonl`, `handoffs/`)을 1초마다 읽기만 합니다(`app/lib/flow.mjs`, [docs/app-screen.md](docs/app-screen.md)).
