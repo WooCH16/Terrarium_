@@ -21,6 +21,15 @@ contextBridge.exposeInMainWorld('terrarium', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (s) => ipcRenderer.invoke('settings:save', s),
   closeSettings: () => ipcRenderer.invoke('settings:close'),
+  // 관제탑 오른쪽 폴더 패널(읽기 전용): 폴더 고르기, 목록, 바뀐 파일·다음 지시 알림
+  files: {
+    root: () => ipcRenderer.invoke('files:root'),
+    pick: () => ipcRenderer.invoke('files:pick'),
+    list: (rel) => ipcRenderer.invoke('files:list', { rel }),
+    onRoot: (fn) => listen('files:root', fn),
+    onChanges: (fn) => listen('files:changes', fn),
+    onReset: (fn) => listen('files:reset', fn),
+  },
   // 관제탑 카드·팀·통합·사무실의 실제 상태(읽기 전용)
   towerStatus: () => ipcRenderer.invoke('tower:status'),
   // 코디네이터 터미널(관제탑의 ORCHESTRA 칸)

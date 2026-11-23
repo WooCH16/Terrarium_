@@ -12,6 +12,7 @@ import { KeyStore, KEY_NAMES, KEY_LABELS } from './lib/keys.mjs';
 import { readStatus } from './lib/status.mjs';
 import { towerView } from './lib/tower.mjs';
 import { install, checkInstallInput, originRepo } from './lib/install.mjs';
+import { listDir, watchFolder } from './lib/files.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fwd = (p) => String(p).replace(/\\/g, '/');
@@ -80,6 +81,8 @@ function createWindow() {
   win.loadFile(towerPage);
   guard(win);
   win.on('resize', () => { fitTower(); fitSettings(); });
+  win.webContents.on('did-finish-load', restartFilesWatch);
+  win.on('closed', () => stopFilesWatch());
   win.webContents.on('did-finish-load', fitTower);
   win.on('closed', () => { win = null; });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -206,8 +209,37 @@ ipcMain.handle('runs:add', async () => {
 function selectRun(run) {
   const changed = readPrefs().currentRun !== run;
   writePrefs({ currentRun: run });
-  if (changed) { stopTerm(); toTower('term:retry', { stopped: true }); }
+  if (changed) { stopTerm(); toTower('term:retry', { stopped: true }); if (!readPrefs().filesRoot) restartFilesWatch(); }
 }
+
+// ---- 관제탑 오른쪽 폴더 패널 (읽기 전용) ----
+// 보이는 폴더: 사용자가 고른 폴더, 없으면 지금 실행 폴더. 바뀐 파일은 묶어서 관제탑에 알린다(수정 중 = 주황, 끝나면 초록).
+// 코디네이터에 다음 지시(Enter)가 들어가면 초록 표시를 지운다(files:reset).
+let stopFilesWatch = () => {};
+function filesRoot() {
+  const p = readPrefs();
+  const r = p.filesRoot || p.currentRun || '';
+  return r && existsSync(r) ? fwd(r) : '';
+}
+function restartFilesWatch() {
+  stopFilesWatch();
+  const root = filesRoot();
+  stopFilesWatch = root ? watchFolder(root, (paths) => toTower('files:changes', { root, paths })) : () => {};
+  toTower('files:root', { root });
+}
+ipcMain.handle('files:root', () => ({ root: filesRoot() }));
+ipcMain.handle('files:pick', async () => {
+  const r = await dialog.showOpenDialog(win, { title: '오른쪽 패널에 보일 폴더 고르기', properties: ['openDirectory'] });
+  if (r.canceled) return { root: filesRoot() };
+  writePrefs({ filesRoot: fwd(r.filePaths[0]) });
+  restartFilesWatch();
+  return { root: filesRoot() };
+});
+ipcMain.handle('files:list', (_e, { rel } = {}) => {
+  const root = filesRoot();
+  if (!root) return { ok: false, error: '폴더를 고르세요.' };
+  try { return { ok: true, entries: listDir(root, rel ?? '') }; } catch (e) { return { ok: false, error: e.message }; }
+});
 ipcMain.handle('runs:select', (_e, { run }) => { if (run !== '' && !allowedRun(run)) return { ok: false }; selectRun(run); return { ok: true }; });
 
 // ---- 코디네이터 터미널 (#39, 결정 8-18) ----
@@ -235,7 +267,12 @@ ipcMain.handle('term:start', async (_e, { fresh = false, cols, rows } = {}) => {
   try { t.start(); } catch (e) { term = null; return { ok: false, error: `코디네이터를 띄우지 못했습니다: ${e.message}` }; }
   return { ok: true, run, resumed: Boolean(resume) };
 });
-ipcMain.on('term:input', (_e, data) => { if (typeof data === 'string' && data.length <= 100000) term?.write(data); });
+ipcMain.on('term:input', (_e, data) => {
+  if (typeof data !== 'string' || data.length > 100000) return;
+  term?.write(data);
+  // 코디네이터에 다음 지시를 보냈다(Enter): 폴더 패널의 "수정 완료"(초록) 표시를 지운다.
+  if (term && data.includes('\r')) toTower('files:reset', {});
+});
 ipcMain.on('term:resize', (_e, { cols, rows } = {}) => term?.resize(cols, rows));
 ipcMain.handle('settings:open', (_e, { tab } = {}) => { openSettings(['accounts', 'install', 'progress'].includes(tab) ? tab : 'accounts'); return { ok: true }; });
 ipcMain.handle('settings:close', () => { closeSettings(); return { ok: true }; });
@@ -283,11 +320,33 @@ async function smoke(dir) {
   // 관제탑: 터미널이 뜨고(조건이 맞으면) 첫 화면이 그려질 때까지 기다린 뒤 찍는다.
   win = new BrowserWindow({ width: 1320, height: 900, show: false, webPreferences: webPreferences() });
   await win.loadFile(towerPage);
+  restartFilesWatch();
   fitTower();
   await wait(Number(process.env.TERRARIUM_SMOKE_WAIT ?? 8) * 1000);
   await shot(win, 'tower');
   // 터미널 렌더러: WebGL이면 #term 안에 canvas가 있다(로고 블록 문자를 화소로 그린다).
   writeFileSync(`${dir}/terminal-renderer.json`, JSON.stringify({ webgl: await win.webContents.executeJavaScript("Boolean(document.querySelector('#term canvas'))") }));
+  // 오른쪽 폴더 패널: 창을 넓혀 패널을 보이고, 고른 폴더(prefs.filesRoot)의 파일을 바꿔 주황 → 초록 → 다음 지시로 지워지는지 본다.
+  if (readPrefs().filesRoot) {
+    const q = (code) => win.webContents.executeJavaScript(code);
+    win.setContentSize(1800, 900);
+    fitTower();
+    await wait(1200);
+    const files = { visible: await q("getComputedStyle(document.getElementById('files')).display !== 'none'"), rows: await q("document.querySelectorAll('#files .f-row').length") };
+    writeFileSync(`${readPrefs().filesRoot}/smoke-edit.txt`, String(Date.now()));
+    await wait(900);
+    files.editing = await q("[...document.querySelectorAll('#files .f-row.editing')].map((r) => r.title)");
+    await shot(win, 'files-editing');
+    await wait(3200);
+    files.done = await q("[...document.querySelectorAll('#files .f-row.done')].map((r) => r.title)");
+    await shot(win, 'files-done');
+    toTower('files:reset', {});
+    await wait(300);
+    files.afterNextInstruction = await q("document.querySelectorAll('#files .f-row.done, #files .f-row.editing').length");
+    writeFileSync(`${dir}/files-panel.json`, JSON.stringify(files, null, 2));
+    win.setContentSize(1320, 900);
+    fitTower();
+  }
   // 관제탑의 팀 상세·통합·사무실도 눌러서 찍는다(실제 상태가 들어갔는지 보려고).
   for (const [name, sel] of [['tower-team', '.item[data-team="sec"]'], ['tower-total', '.item-total'], ['tower-office', '.tab[data-mode="office"]'], ['tower-back', '.tab[data-mode="matrix"]']]) {
     await win.webContents.executeJavaScript(`document.querySelector('${sel}').click()`);

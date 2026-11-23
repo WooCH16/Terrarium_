@@ -105,9 +105,21 @@
   </nav>
 
 </main>
+
+<!-- 데스크톱 앱에서만: 오른쪽 빈 공간의 폴더 패널(js/files.js). 수정 중 = 주황, 수정 완료 = 초록(다음 지시 전까지) -->
+<aside id="files" class="files" aria-label="폴더" hidden>
+  <div class="files-head">
+    <span class="side-title">FILES</span>
+    <button type="button" id="files-pick" class="files-pick" title="보일 폴더 고르기">폴더…</button>
+  </div>
+  <div id="files-root" class="files-root"></div>
+  <div class="files-legend"><span class="editing">● 수정 중</span><span class="done">● 수정 완료</span></div>
+  <div id="files-tree" class="files-tree" role="tree"></div>
+</aside>
 <script src="js/api.js"></script>
 <script src="js/live.js"></script>
 <script src="js/app.js"></script>
 <script src="js/terminal.js"></script>
+<script src="js/files.js"></script>
 </body>
 </html>
