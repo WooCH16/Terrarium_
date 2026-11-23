@@ -24,14 +24,18 @@
 [data-team="sec"]    { --c: #A0A6AF; --lt: #C4C9D1; --idle-c: #6E737B; --idle-t: #C4C9D1; --bg: rgba(12, 12, 14, 0.97); --glow-w: rgba(160, 166, 175, 0.35); --glow-i: rgba(160, 166, 175, 0.1); --dim: #6E737B; --dim-bg: rgba(30, 30, 34, 0.9); }
 
 html, body { margin: 0; height: 100%; }
-body { background: var(--shell); display: flex; align-items: center; justify-content: flex-start; overflow: hidden; }
+body { background: var(--shell); display: flex; align-items: stretch; justify-content: flex-start; overflow: hidden; }
 * { box-sizing: border-box; }
 button { font: inherit; cursor: pointer; text-align: left; flex-shrink: 0; }
 button:focus-visible, input:focus-visible { outline: 2px solid #FFFFFF; outline-offset: 2px; }
 
-.stage { position: relative; width: 880px; height: 600px; flex-shrink: 0; background: var(--shell); font-family: var(--mono); overflow: hidden; }
-.view { position: absolute; left: 0; top: 0; width: 880px; height: 600px; }
+/* 무대는 창 높이를 다 쓴다(최소 600). 목록은 위아래를 채우고, 가운데 화면(.view, 880x600 배치)은 세로 가운데에 둔다 */
+.stage { position: relative; width: 880px; height: 100%; min-height: 600px; flex-shrink: 0; background: var(--shell); font-family: var(--mono); overflow: hidden; }
+.view { position: absolute; left: 0; top: calc(50% - 300px); width: 880px; height: 600px; }
 .view[hidden] { display: none; }
+/* 팀 상세·통합은 검은 판이라 창 높이를 다 채운다(가운데 배치면 위아래에 회색 띠가 생긴다) */
+#view-team, #view-total { top: 0; height: 100%; }
+#view-team .panel, #view-total .panel { height: 100%; }
 
 .api-log { flex-grow: 1; text-align: right; font-size: 11px; color: var(--grey); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -168,7 +172,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid #FFFFFF; outline-
 @keyframes scan { to { background-position: 0 6px; } }
 
 /* ---------- 사이드바 ---------- */
-.sidebar { position: absolute; left: 0; top: 0; width: 160px; height: 600px; display: flex; flex-direction: column; overflow: hidden; background: var(--shell); border: 1px solid #000000; }
+.sidebar { position: absolute; left: 0; top: 0; width: 160px; height: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--shell); border: 1px solid #000000; }
 .side-head { height: 40px; flex-shrink: 0; padding: 0 14px; border-bottom: 1px solid var(--green-dim); display: flex; justify-content: space-between; align-items: center; }
 .side-title { font-size: 12px; font-weight: 700; letter-spacing: 0.2em; color: var(--green); }
 .work-count { font-size: 11px; color: #9DFFB5; }
@@ -195,7 +199,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid #FFFFFF; outline-
 }
 
 /* 데스크톱 앱: 오른쪽 빈 공간의 폴더 패널(js/files.js). 무대(880px) 오른쪽에 남는 폭을 쓰고, 좁으면 숨긴다 */
-.files { flex: 1 1 0; min-width: 260px; height: 600px; margin: 0 12px 0 14px; display: flex; flex-direction: column; overflow: hidden; background: #000000; border: 1px solid #000000; font-family: var(--mono); }
+.files { flex: 1 1 0; min-width: 260px; min-height: 600px; margin: 0 12px 0 14px; display: flex; flex-direction: column; overflow: hidden; background: #000000; border: 1px solid #000000; font-family: var(--mono); }
 .files[hidden] { display: none; }
 .files-head { height: 40px; flex-shrink: 0; padding: 0 10px 0 14px; display: flex; justify-content: space-between; align-items: center; background: var(--shell); border-bottom: 1px solid var(--green-dim); }
 .files-pick { height: 24px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 5px; background: transparent; color: var(--grey-lt); font: 700 11px var(--mono); cursor: pointer; }
