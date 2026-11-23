@@ -68,10 +68,12 @@ function guard(w) {
 }
 
 // 관제탑은 880x600 무대다. CSS zoom 대신 창의 확대 배율로 맞춘다(xterm의 글자 칸 계산과 마우스 선택이 CSS zoom에서 어긋난다).
+// 오른쪽 폴더 패널 자리(css .files의 최소 폭 + 여백)를 늘 남긴다: 창 모드에서도 패널이 보인다. 넓은 창에서는 패널이 남는 폭을 채운다.
+const STAGE_W = 880 + 290;
 function fitTower() {
   if (!win || win.isDestroyed()) return;
   const [w, h] = win.getContentSize();
-  win.webContents.setZoomFactor(Math.max(0.5, Math.min(2, w / 880, h / 600)));
+  win.webContents.setZoomFactor(Math.max(0.4, Math.min(2, w / STAGE_W, h / 600)));
 }
 
 function createWindow() {
@@ -104,16 +106,16 @@ function fitSettings() {
   const [w, h] = win.getContentSize();
   settingsView.setBounds({ x: 0, y: 0, width: w, height: h });
 }
-function openSettings(tab = 'accounts') {
+function openSettings(tab = 'accounts', { project } = {}) {
   if (!win || win.isDestroyed()) return null;
   if (!settingsView || settingsView.webContents.isDestroyed()) {
     settingsView = new WebContentsView({ webPreferences: webPreferences() });
     settingsView.setBackgroundColor('#121417');
     guard(settingsView);
-    settingsView.webContents.loadFile(join(here, 'renderer', 'index.html'), { query: { tab } });
+    settingsView.webContents.loadFile(join(here, 'renderer', 'index.html'), { query: { tab, ...(project ? { project } : {}) } });
   } else {
-    // 다시 열 때마다 저장하지 않은 입력을 버리고 지금 값을 다시 읽는다.
-    settingsView.webContents.send('settings:tab', tab);
+    // 다시 열 때마다 저장하지 않은 입력을 버리고 지금 값을 다시 읽는다. project가 있으면 설치 탭에 채운다.
+    settingsView.webContents.send('settings:tab', project ? { tab, project } : tab);
   }
   win.contentView.addChildView(settingsView);
   fitSettings();
@@ -190,18 +192,39 @@ ipcMain.handle('runs:list', () => {
   const cur = readPrefs().currentRun;
   return { runs, current: runs.includes(cur) ? cur : runs[0] ?? null };
 });
-ipcMain.handle('runs:add', async () => {
-  const r = await dialog.showOpenDialog(win, { title: '기존 실행 폴더 열기(harness.json이 있는 폴더)', properties: ['openDirectory'] });
-  if (r.canceled) return { ok: false };
-  const run = fwd(r.filePaths[0]);
-  if (!existsSync(`${run}/harness.json`)) return { ok: false, error: '실행 폴더가 아닙니다(harness.json 없음).' };
+// 실행 폴더가 아닌 폴더(harness.json 없음): 대상 프로젝트로 설치할지 묻는다. 설치는 설정의 설치 탭에서(값을 채워 넘긴다).
+// 돌려주는 값: 'install'(설치 탭으로 넘김), 'view'(보기만, allowView일 때), null(취소).
+async function askInstallProject(folder, { allowView = false } = {}) {
+  const buttons = allowView ? ['설치하러 가기', '보기만', '취소'] : ['설치하러 가기', '취소'];
+  const c = await dialog.showMessageBox(win, {
+    type: 'question', buttons, defaultId: 0, cancelId: buttons.length - 1,
+    message: '이 프로젝트를 대상 프로젝트로 설치할까요?',
+    detail: `${folder}\n\n실행 폴더가 아닙니다(harness.json 없음). 설치하면 새 실행 폴더를 만들고 이 프로젝트를 그 안에 복제해 일합니다. 원본 폴더는 건드리지 않습니다.${allowView ? '\n\n보기만: 오른쪽 패널에 이 폴더를 보이기만 합니다(코디네이터는 그대로).' : ''}`,
+  });
+  if (c.response === 0) { openSettings('install', { project: folder }); return 'install'; }
+  if (allowView && c.response === 1) return 'view';
+  return null;
+}
+// 실행 폴더를 목록에 더한다(다른 하네스 폴더를 쓰면 묻는다). 고르지 않으면 false.
+async function addRunFolder(run) {
   let theirs = null;
   try { theirs = fwd(JSON.parse(readFileSync(`${run}/harness.json`, 'utf8')).harnessDir); } catch { /* 아래에서 알린다 */ }
   if (theirs !== harnessDir) {
     const c = await dialog.showMessageBox(win, { type: 'warning', buttons: ['그래도 열기', '취소'], defaultId: 1, cancelId: 1, message: '이 실행 폴더는 다른 하네스 폴더를 씁니다.', detail: `실행 폴더의 하네스: ${theirs ?? '읽지 못함'}\n이 앱의 하네스: ${harnessDir}\n\n같은 버전으로 맞추려면 setup.mjs --refresh를 실행하세요.` });
-    if (c.response !== 0) return { ok: false };
+    if (c.response !== 0) return false;
   }
   writePrefs({ extraRuns: [...new Set([...(readPrefs().extraRuns ?? []), run])] });
+  return true;
+}
+ipcMain.handle('runs:add', async () => {
+  const r = await dialog.showOpenDialog(win, { title: '실행 폴더 열기(일반 프로젝트를 고르면 설치할지 묻습니다)', properties: ['openDirectory'] });
+  if (r.canceled) return { ok: false };
+  const run = fwd(r.filePaths[0]);
+  if (!existsSync(`${run}/harness.json`)) {
+    const a = await askInstallProject(run);
+    return { ok: false, install: a === 'install' ? run : undefined };
+  }
+  if (!(await addRunFolder(run))) return { ok: false };
   selectRun(run);
   return { ok: true, run };
 });
@@ -209,7 +232,7 @@ ipcMain.handle('runs:add', async () => {
 function selectRun(run) {
   const changed = readPrefs().currentRun !== run;
   writePrefs({ currentRun: run });
-  if (changed) { stopTerm(); toTower('term:retry', { stopped: true }); if (!readPrefs().filesRoot) restartFilesWatch(); }
+  if (changed) { stopTerm(); toTower('term:retry', { stopped: true }); writePrefs({ filesRoot: '' }); restartFilesWatch(); }
 }
 
 // ---- 관제탑 오른쪽 폴더 패널 (읽기 전용) ----
@@ -225,15 +248,26 @@ function restartFilesWatch() {
   stopFilesWatch();
   const root = filesRoot();
   stopFilesWatch = root ? watchFolder(root, (paths) => toTower('files:changes', { root, paths })) : () => {};
-  toTower('files:root', { root });
+  toTower('files:root', { root, kind: filesKind() });
 }
-ipcMain.handle('files:root', () => ({ root: filesRoot() }));
+const filesKind = () => (readPrefs().filesRoot ? 'view' : 'run');
+ipcMain.handle('files:root', () => ({ root: filesRoot(), kind: filesKind() }));
+// 오른쪽 패널의 [폴더…]: 작업 폴더 고르기.
+// 실행 폴더면 코디네이터를 그 폴더로 옮길지 묻는다. 일반 프로젝트면 대상 프로젝트로 설치할지 묻고, 보기만 하면 패널에만 보인다.
 ipcMain.handle('files:pick', async () => {
-  const r = await dialog.showOpenDialog(win, { title: '오른쪽 패널에 보일 폴더 고르기', properties: ['openDirectory'] });
-  if (r.canceled) return { root: filesRoot() };
-  writePrefs({ filesRoot: fwd(r.filePaths[0]) });
-  restartFilesWatch();
-  return { root: filesRoot() };
+  const r = await dialog.showOpenDialog(win, { title: '작업 폴더 고르기(실행 폴더 또는 프로젝트 폴더)', properties: ['openDirectory'] });
+  if (r.canceled) return { root: filesRoot(), kind: filesKind() };
+  const folder = fwd(r.filePaths[0]);
+  if (existsSync(`${folder}/harness.json`)) {
+    if (folder !== readPrefs().currentRun) {
+      const c = await dialog.showMessageBox(win, { type: 'question', buttons: ['바꾸기', '취소'], defaultId: 0, cancelId: 1, message: '이 실행 폴더로 바꿀까요?', detail: `${folder}\n\n코디네이터 터미널을 닫고 이 실행 폴더에서 다시 띄웁니다.` });
+      if (c.response === 0 && (await addRunFolder(folder))) selectRun(folder);
+    }
+  } else if ((await askInstallProject(folder, { allowView: true })) === 'view') {
+    writePrefs({ filesRoot: folder });
+    restartFilesWatch();
+  }
+  return { root: filesRoot(), kind: filesKind() };
 });
 ipcMain.handle('files:list', (_e, { rel } = {}) => {
   const root = filesRoot();
@@ -385,6 +419,11 @@ async function smoke(dir) {
   await js("document.getElementById('back').click()");
   await wait(300);
   flow.closedOnBackWithoutChanges = !attached();
+  // 일반 프로젝트를 골라 "설치하러 가기"를 누른 뒤의 화면: 설치 탭에 대상 프로젝트와 실행 폴더 이름이 채워진다.
+  openSettings('install', { project: 'C:/work/My Project' });
+  await wait(800);
+  flow.installPrefill = await js("({ tab: document.querySelector('[data-tab][aria-selected=\"true\"]').dataset.tab, project: document.getElementById('in-project').value, name: document.getElementById('in-name').value })");
+  closeSettings();
   writeFileSync(`${dir}/settings-flow.json`, JSON.stringify(flow, null, 2));
   // 화면 그림은 같은 설정 페이지를 숨긴 창에 따로 띄워 찍는다(본창 안 보기는 숨긴 창에서 찍히지 않는다).
   const sw = new BrowserWindow({ width: 1320, height: 900, show: false, webPreferences: webPreferences() });

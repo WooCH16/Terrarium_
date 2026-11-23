@@ -72,7 +72,7 @@
     render();
   }
 
-  async function setRoot(r) {
+  async function setRoot(r, kind) {
     root = r || '';
     listings.clear();
     open.clear();
@@ -80,7 +80,8 @@
     for (const m of marks.values()) clearTimeout(m.timer);
     marks.clear();
     const label = $('files-root');
-    label.textContent = root ? root.split('/').filter(Boolean).pop() : '(폴더 없음)';
+    label.replaceChildren(document.createTextNode(root ? root.split('/').filter(Boolean).pop() : '(폴더 없음 — [폴더…]로 고르세요)'));
+    if (root) { const k = document.createElement('span'); k.className = 'files-kind'; k.textContent = kind === 'view' ? '보기만' : '실행 폴더'; label.append(k); }
     label.title = root;
     if (root) await load('');
     render();
@@ -114,7 +115,7 @@
     for (const [p, m] of marks) if (m.s === 'done') marks.delete(p);
     render();
   });
-  F.onRoot(({ root: r }) => { if (r !== root) setRoot(r); });
-  $('files-pick').addEventListener('click', async () => { const r = await F.pick(); if (r.root !== root) setRoot(r.root); });
-  F.root().then((r) => setRoot(r.root));
+  F.onRoot(({ root: r, kind }) => { if (r !== root) setRoot(r, kind); });
+  $('files-pick').addEventListener('click', async () => { const r = await F.pick(); if (r.root !== root) setRoot(r.root, r.kind); });
+  F.root().then((r) => setRoot(r.root, r.kind));
 })();

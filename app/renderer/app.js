@@ -22,7 +22,24 @@ function showTab(tab) {
 }
 for (const b of document.querySelectorAll('[data-tab]')) b.addEventListener('click', () => showTab(b.dataset.tab));
 // 관제탑에서 [설정]을 다시 누를 때마다 저장하지 않은 입력을 버리고 지금 값을 다시 읽는다.
-T.onSettingsTab(async (tab) => { await resetAll(); showTab(tab); });
+T.onSettingsTab(async (msg) => {
+  const { tab, project } = typeof msg === 'string' ? { tab: msg } : msg;
+  await resetAll();
+  showTab(tab);
+  if (project) prefillInstall(project);
+});
+
+// 일반 프로젝트 폴더를 골랐을 때(설정의 열기… 또는 관제탑 오른쪽 패널의 폴더…): 설치 탭에 대상 프로젝트와 실행 폴더 이름을 채운다.
+function prefillInstall(project) {
+  $('in-project').value = project;
+  const base = project.split('/').filter(Boolean).pop() ?? '';
+  const name = base.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[^A-Za-z0-9]+/, '').slice(0, 60);
+  if (!$('in-name').value) $('in-name').value = name ? `${name}-run` : '';
+  const out = $('in-result');
+  out.className = 'card muted';
+  out.textContent = `대상 프로젝트로 ${project}를 채웠습니다. 지정 저장소와 실행 폴더 이름을 확인하고 [설치]를 누르세요.`;
+  ($('in-repo').value ? $('in-run') : $('in-repo')).focus();
+}
 
 // ---- 실행 폴더 ----
 async function loadRuns(select) {
@@ -38,7 +55,7 @@ async function loadRuns(select) {
 }
 // 실행 폴더를 바꾸면 코디네이터 터미널이 그 폴더로 다시 뜬다. 그래서 고르기만 하고 [저장] 때 적용한다.
 $('run-select').addEventListener('change', (e) => { currentRun = e.target.value; markDirty(); refreshProgress(); });
-$('run-add').addEventListener('click', async () => { const r = await T.addRun(); if (r.ok) { await loadRuns(r.run); refreshProgress(); } else if (r.error) alert(r.error); });
+$('run-add').addEventListener('click', async () => { const r = await T.addRun(); if (r.ok) { await loadRuns(r.run); refreshProgress(); } else if (r.install) { showTab('install'); prefillInstall(r.install); } else if (r.error) alert(r.error); });
 
 // ---- 계정 ----
 $('pf-run').addEventListener('click', async () => {
@@ -195,5 +212,6 @@ async function refreshProgress() {
 $('pg-refresh').addEventListener('click', refreshProgress);
 setInterval(() => { if (document.querySelector('#tab-progress.active')) refreshProgress(); }, 60000);
 
-resetAll();
-showTab(new URLSearchParams(location.search).get('tab') || 'accounts');
+const startQuery = new URLSearchParams(location.search);
+resetAll().then(() => { if (startQuery.get('project')) prefillInstall(startQuery.get('project')); });
+showTab(startQuery.get('tab') || 'accounts');
