@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",
+    "@xterm/addon-webgl": "0.19.0",
     "@xterm/xterm": "6.0.0",
     "node-pty": "1.1.0"
   },
@@ -24,15 +25,49 @@
   "build": {
     "appId": "dev.terrarium.desktop",
     "productName": "Terrarium",
-    "directories": { "output": "dist" },
-    "files": ["main.js", "preload.cjs", "lib/**", "renderer/**", "package.json"],
-    "npmRebuild": false,
-    "asarUnpack": ["node_modules/node-pty/**"],
-    "extraResources": [
-      { "from": "../harness", "to": "harness", "filter": ["**/*", "!test/**", "!e2e/scenarios/**"] },
-      { "from": "..", "to": "tower", "filter": ["index.html", "css/**", "js/**", "assets/**"] }
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.cjs",
+      "lib/**",
+      "renderer/**",
+      "package.json"
     ],
-    "win": { "target": "nsis", "signAndEditExecutable": false },
-    "nsis": { "oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true }
+    "npmRebuild": false,
+    "asarUnpack": [
+      "node_modules/node-pty/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../harness",
+        "to": "harness",
+        "filter": [
+          "**/*",
+          "!test/**",
+          "!e2e/scenarios/**"
+        ]
+      },
+      {
+        "from": "..",
+        "to": "tower",
+        "filter": [
+          "index.html",
+          "css/**",
+          "js/**",
+          "assets/**"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

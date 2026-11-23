@@ -64,6 +64,9 @@
       load('script', { src: T.base + '/xterm/lib/xterm.js' }),
     ]);
     await load('script', { src: T.base + '/addon-fit/lib/addon-fit.js' });
+    // WebGL 렌더러: Claude Code 로고 같은 블록 문자(▐▛█▜▌)를 글꼴 대신 화소로 그려 칸 사이 틈이 없다.
+    // 불러오지 못하거나 WebGL을 못 쓰면 기본(DOM) 렌더러로 그대로 돈다.
+    await load('script', { src: T.base + '/addon-webgl/lib/addon-webgl.js' }).catch(() => {});
     if (document.fonts && document.fonts.ready) await document.fonts.ready;
     term = new window.Terminal({
       fontFamily: "'JetBrains Mono', Consolas, 'Noto Sans KR', monospace",
@@ -77,6 +80,13 @@
     fit = new window.FitAddon.FitAddon();
     term.loadAddon(fit);
     term.open(box);
+    if (window.WebglAddon) {
+      try {
+        const gl = new window.WebglAddon.WebglAddon();
+        gl.onContextLoss(() => gl.dispose()); // GPU가 문맥을 잃으면 DOM 렌더러로 돌아간다
+        term.loadAddon(gl);
+      } catch { /* WebGL을 못 쓰는 컴퓨터: DOM 렌더러 */ }
+    }
     fit.fit();
     // Ctrl+C: 고른 글이 있으면 복사, 없으면 코디네이터에 끊기 신호로 보낸다.
     term.attachCustomKeyEventHandler((e) => {

@@ -286,6 +286,8 @@ async function smoke(dir) {
   fitTower();
   await wait(Number(process.env.TERRARIUM_SMOKE_WAIT ?? 8) * 1000);
   await shot(win, 'tower');
+  // 터미널 렌더러: WebGL이면 #term 안에 canvas가 있다(로고 블록 문자를 화소로 그린다).
+  writeFileSync(`${dir}/terminal-renderer.json`, JSON.stringify({ webgl: await win.webContents.executeJavaScript("Boolean(document.querySelector('#term canvas'))") }));
   // 관제탑의 팀 상세·통합·사무실도 눌러서 찍는다(실제 상태가 들어갔는지 보려고).
   for (const [name, sel] of [['tower-team', '.item[data-team="sec"]'], ['tower-total', '.item-total'], ['tower-office', '.tab[data-mode="office"]'], ['tower-back', '.tab[data-mode="matrix"]']]) {
     await win.webContents.executeJavaScript(`document.querySelector('${sel}').click()`);
