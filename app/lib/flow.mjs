@@ -237,7 +237,8 @@ export class FlowTracker {
       const opId = `op-${h.name}`;
       const team = h.team ?? h.dispatch?.team ?? null;
       const research = (h.mode ?? h.dispatch?.mode) === 'research';
-      const issues = h.dispatch?.live ?? h.issues ?? [];
+      // 하달 직후에는 dispatch.json의 live가 아직 null이다(이슈를 거르는 중). 그때는 요청된 이슈를 보인다(run-18 h26에서 "이슈 없음"으로 뜸).
+      const issues = h.dispatch?.live ?? (h.dispatch?.requested?.length ? h.dispatch.requested : h.issues) ?? [];
       const out = (h.dispatch?.excluded ?? []).map((x) => `#${x.issue} 빠짐(${x.reason})`);
       const list = [...issues.map((n) => `#${n}`), ...out].join(', ') || '없음';
       if (!this.sessions.has(opId)) {

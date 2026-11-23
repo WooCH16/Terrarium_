@@ -56,6 +56,10 @@ test('흐름: 하달한 팀의 오퍼레이터와 하달 이슈의 워커만 뜬
   assert.equal(lastStatus(events, 'adv-1'), 'REVIEWING', 'Jev 조언 판정을 받는 동안');
   H.advice('허용');
   H.guard({ tool_name: 'Bash', summary: 'node h/operator/run-operator.mjs --issues 11,12' });
+  // 하달 직후: live는 아직 null(run-operator가 이슈를 거르는 중). 창의 할 일에는 요청된 이슈가 보여야 한다
+  H.dispatch('h1', { team: 'dev', requested: [11, 12], live: null });
+  tick();
+  assert.match(spawned(events).find((x) => x.id === 'op-h1').task, /#11, #12/);
   H.dispatch('h1', { team: 'dev', requested: [11, 12], live: [11, 12] });
   H.session('h1', { pid: 42, issues: [11, 12] });
   tick();
