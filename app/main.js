@@ -110,7 +110,7 @@ function openSettings(tab = 'accounts', { project } = {}) {
   if (!win || win.isDestroyed()) return null;
   if (!settingsView || settingsView.webContents.isDestroyed()) {
     settingsView = new WebContentsView({ webPreferences: webPreferences() });
-    settingsView.setBackgroundColor('#121417');
+    settingsView.setBackgroundColor('#15181E');
     guard(settingsView);
     settingsView.webContents.loadFile(join(here, 'renderer', 'index.html'), { query: { tab, ...(project ? { project } : {}) } });
   } else {

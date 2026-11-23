@@ -75,7 +75,7 @@
       cursorBlink: true,
       scrollback: 5000,
       allowProposedApi: false,
-      theme: { background: '#000c03', foreground: '#B8FFC8', cursor: '#00FF41', selectionBackground: '#0E5A22', green: '#00FF41', brightGreen: '#4FB36A' },
+      theme: { background: '#0C110E', foreground: '#B8FFC8', cursor: '#00FF41', selectionBackground: '#0E5A22', green: '#00FF41', brightGreen: '#4FB36A' },
     });
     fit = new window.FitAddon.FitAddon();
     term.loadAddon(fit);

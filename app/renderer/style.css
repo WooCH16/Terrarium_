@@ -1,7 +1,7 @@
 /* 관제탑(css/style.css)과 같은 어두운 바탕·초록 강조. 오래 읽는 창이라 눈부심을 줄인다:
    글자는 순백 대신 부드러운 회백, 형광 초록은 강조선에만, 본문은 15px·줄 간격 1.6, 대비는 본문 약 13:1, 보조 글자 약 7:1. */
 :root {
-  --bg: #121417; --panel: #1A1D21; --panel-2: #20242A; --ink: #E2E5EA; --muted: #A4ABB5; --line: #2F343B;
+  --bg: #15181E; --panel: #1C2028; --panel-2: #252A34; --ink: #E2E5EA; --muted: #A4ABB5; --line: #2F3541;
   --accent: #4FB36A; --accent-strong: #00FF41; --accent-bg: #0F2A18; --accent-ink: #06140A;
   --ok: #6FD08C; --bad: #FF8F86; --warn: #E9C46A; --info: #8DB8FF;
   font-family: "Segoe UI", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif; font-size: 15px; line-height: 1.6; color: var(--ink);
