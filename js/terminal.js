@@ -4,6 +4,7 @@
   const T = window.terrarium && window.terrarium.terminal;
   if (!T) return;
   const $ = (id) => document.getElementById(id);
+  document.body.classList.add('app'); // 앱 배치(css body.app): 가운데 화면이 남는 폭을 쓴다
   // 목록 맨 아래의 설정 단추(메뉴줄을 숨겼다. 누르면 본창 안에서 설정 화면으로 바뀐다)
   const settingsBtn = $('open-settings');
   if (settingsBtn && T.openSettings) {

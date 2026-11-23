@@ -15,6 +15,61 @@
   const marks = new Map(); // 상대 경로 → { s: 'editing' | 'done', timer }
 
   panel.hidden = false;
+
+  // ---- 폭 바꾸기(왼쪽 가장자리를 끌기, 또는 손잡이에 초점을 두고 ←/→)와 접기·열기 ----
+  // 넓히면 가운데 화면이 그만큼 줄어든다(css body.app). 폭과 열림은 이 컴퓨터에 기억한다(없어도 기본값으로 돈다).
+  const resizer = $('files-resizer');
+  const MIN_W = 160, MAIN_MIN = 520, SIDE_W = 160, DEFAULT_W = 196;
+  const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* 기억 못 해도 된다 */ } } };
+  const maxW = () => Math.max(MIN_W, window.innerWidth - SIDE_W - MAIN_MIN - 6);
+  let width = Number(store.get('terrarium.filesW')) || DEFAULT_W;
+  function applyWidth(w, save) {
+    width = Math.round(Math.min(maxW(), Math.max(MIN_W, w)));
+    document.body.style.setProperty('--files-w', width + 'px');
+    resizer.setAttribute('aria-valuenow', String(width));
+    if (save) store.set('terrarium.filesW', String(width));
+  }
+  resizer.hidden = false;
+  applyWidth(width, false);
+  window.addEventListener('resize', () => applyWidth(width, false));
+  resizer.addEventListener('pointerdown', (e) => {
+    const startX = e.clientX, startW = width;
+    resizer.setPointerCapture(e.pointerId);
+    document.body.classList.add('files-resizing');
+    const move = (ev) => applyWidth(startW - (ev.clientX - startX), false);
+    const up = () => {
+      resizer.removeEventListener('pointermove', move);
+      resizer.removeEventListener('pointerup', up);
+      resizer.removeEventListener('pointercancel', up);
+      document.body.classList.remove('files-resizing');
+      applyWidth(width, true);
+    };
+    resizer.addEventListener('pointermove', move);
+    resizer.addEventListener('pointerup', up);
+    resizer.addEventListener('pointercancel', up);
+  });
+  resizer.addEventListener('dblclick', () => applyWidth(DEFAULT_W, true)); // 두 번 누르면 기본 폭
+  resizer.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft') { applyWidth(width + 16, true); e.preventDefault(); }
+    if (e.key === 'ArrowRight') { applyWidth(width - 16, true); e.preventDefault(); }
+  });
+
+  // 패널 단추: 코디네이터 칸 머리줄 오른쪽(ONLINE 옆)에 둔다.
+  const panelBtn = document.createElement('button');
+  panelBtn.type = 'button';
+  panelBtn.className = 'panel-toggle';
+  const head = document.querySelector('#view-main .chat-head');
+  if (head) head.append(panelBtn);
+  function setOpen(isOpen, save) {
+    document.body.classList.toggle('files-closed', !isOpen);
+    panelBtn.setAttribute('aria-pressed', String(isOpen));
+    panelBtn.title = isOpen ? '파일 패널 접기' : '파일 패널 열기';
+    panelBtn.setAttribute('aria-label', panelBtn.title);
+    if (save) store.set('terrarium.filesOpen', isOpen ? '1' : '0');
+  }
+  setOpen(store.get('terrarium.filesOpen') !== '0', false);
+  panelBtn.addEventListener('click', () => setOpen(document.body.classList.contains('files-closed'), true));
+
   const parentOf = (rel) => (rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '');
   const join = (dir, name) => (dir ? dir + '/' + name : name);
 

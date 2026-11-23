@@ -69,7 +69,7 @@ function guard(w) {
 
 // 관제탑은 880x600 무대다. CSS zoom 대신 창의 확대 배율로 맞춘다(xterm의 글자 칸 계산과 마우스 선택이 CSS zoom에서 어긋난다).
 // 오른쪽 폴더 패널 자리(css .files의 최소 폭 + 여백)를 늘 남긴다: 창 모드에서도 패널이 보인다. 넓은 창에서는 패널이 남는 폭을 채운다.
-const STAGE_W = 880 + 290;
+const STAGE_W = 160 + 720 + 196; // 목록 + 가운데 기준 폭 + 파일 패널 기본 폭. 패널을 끌어 넓혀도 배율은 그대로고 가운데가 줄어든다
 function fitTower() {
   if (!win || win.isDestroyed()) return;
   const [w, h] = win.getContentSize();
@@ -377,6 +377,21 @@ async function smoke(dir) {
     toTower('files:reset', {});
     await wait(300);
     files.afterNextInstruction = await q("document.querySelectorAll('#files .f-row.done, #files .f-row.editing').length");
+    // 폭 바꾸기·접기: 손잡이를 ←로 다섯 번(80px 넓힘) → 코디네이터 칸이 좁아지고, 접으면 넓어지는지.
+    const chatW = () => q("Math.round(document.querySelector('.chat').getBoundingClientRect().width)");
+    files.layout = { app: await q("document.body.classList.contains('app')"), chat: await chatW(), panel: await q("Math.round(document.getElementById('files').getBoundingClientRect().width)") };
+    await q("(() => { const r = document.getElementById('files-resizer'); for (let i = 0; i < 5; i++) r.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); })()");
+    await wait(300);
+    files.layout.afterWiden = { chat: await chatW(), panel: await q("Math.round(document.getElementById('files').getBoundingClientRect().width)") };
+    await shot(win, 'files-widened');
+    await q("document.querySelector('.panel-toggle').click()");
+    await wait(300);
+    files.layout.closed = { chat: await chatW(), panelShown: await q("getComputedStyle(document.getElementById('files')).display !== 'none'") };
+    await shot(win, 'files-closed');
+    await q("document.querySelector('.panel-toggle').click()");
+    await q("document.getElementById('files-resizer').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))");
+    await wait(300);
+    files.layout.reopened = { chat: await chatW(), panelShown: await q("getComputedStyle(document.getElementById('files')).display !== 'none'") };
     writeFileSync(`${dir}/files-panel.json`, JSON.stringify(files, null, 2));
     win.setContentSize(1320, 900);
     fitTower();
