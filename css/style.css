@@ -185,6 +185,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid #FFFFFF; outline-
 .item[aria-current="true"] { border-color: var(--lt); background: var(--dim-bg); }
 .item-all { --dim: var(--green-dim); --lt: var(--green); --dim-bg: var(--green-bg); }
 .item-total { --dim: var(--line-2); --lt: var(--grey-lt); --dim-bg: rgba(30, 30, 34, 0.9); margin-top: auto; }
+/* 데스크톱 앱에서만 보인다(js/terminal.js가 hidden을 푼다). 목록 맨 아래, 설정 창을 연다 */
+.item-settings { --dim: var(--line-2); --lt: var(--grey); flex-shrink: 0; }
+.item-settings[hidden] { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .flow > path, .live, .c-work, .c-stand, .c-sit, .c-sleep, .zz, .scr { animation: none; }

@@ -39,7 +39,7 @@ There are two ways to use the harness. Either way, the coordinator is the same i
 | | App | Claude CLI |
 |---|---|---|
 | Where you talk to the coordinator | The ORCHESTRA pane of the app's control-tower screen | `claude` started in your own terminal |
-| Preflight check, run folder setup | Screens under the [설정] (Settings) menu | Run `preflight.mjs` and `setup.mjs` yourself |
+| Preflight check, run folder setup | The [설정] (Settings) button at the bottom of the tower's left list | Run `preflight.mjs` and `setup.mjs` yourself |
 | API keys (`TYPESAFE_API_KEY`, `GEMINI_API_KEY`) | Kept in this computer's encrypted storage and passed to the coordinator as environment variables | `.env` at the repository root |
 | Checking progress | [설정 > 진행 기록] (issues, handoffs, verdicts; read-only) | GitHub issues and the record files in the run folder |
 | Good for | Installing and using it without a terminal | Changing or testing the harness, or not installing the app |
@@ -59,10 +59,12 @@ npm start            # run in development
 npm run dist         # Windows installer: app/dist/Terrarium Setup <version>.exe
 ```
 
+Press **[설정]** (Settings) at the bottom of the tower's left list to switch the main window to the settings screen. The run folder choice, API keys, and designated repository take effect only after **[저장]** (Save) → **저장하기** (Save), which also returns you to the tower. **[돌아가기]** (Back) or Esc returns without saving.
+
 First use:
 
-1. **[설정 > 계정]** (Settings > Accounts): log in to Claude Code, GitHub, and Pi with the login buttons. Enter API keys, type the designated repository (`<owner>/<name>`), and press **사전 점검** (preflight check). The coordinator terminal opens only after this check passes.
-2. **[설정 > 실행 폴더 설치]** (Settings > Run folder setup): enter the designated repository, a run folder name, and the target project (a git folder with a `main` branch; leave empty for the sample memo program), then press **설치** (Install). If the designated repository does not exist, the app asks whether to create it as private (if the step 1 check failed because the repository was missing, press the preflight check again after it is created).
+1. **[설정] → 계정** (Accounts tab): log in to Claude Code, GitHub, and Pi with the login buttons. Enter API keys, type the designated repository (`<owner>/<name>`), and press **사전 점검** (preflight check). The coordinator terminal opens only after this check passes.
+2. **[설정] → 설치** (Run folder setup tab): enter the designated repository, a run folder name, and the target project (a git folder with a `main` branch; leave empty for the sample memo program), then press **설치** (Install). If the designated repository does not exist, the app asks whether to create it as private (if the step 1 check failed because the repository was missing, press the preflight check again after it is created).
 3. **ORCHESTRA pane** in the main window: when the terminal appears, talk to the coordinator. The first time, Claude Code asks whether you trust the folder. **The default selection is "No", so pressing Enter alone chooses No. Move down to "Yes, I trust this folder" and press Enter.** With No, the allow list does not apply and the harness hooks may not run.
    - Esc interrupts a turn, and Claude Code commands such as `/compact` work as usual. Pressing Esc while a handoff is running does not stop the handoff; on the next turn the coordinator picks it up again. To stop a handoff, ask the coordinator to stop it (`stop-operator`), not Esc.
    - When the coordinator exits, press Enter in the terminal to reopen the same conversation, or N for a new one.

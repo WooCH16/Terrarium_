@@ -8,12 +8,26 @@
 </head>
 <body>
   <header class="top">
-    <div class="brand">Terrarium <span class="sub">설정 · 코디네이터는 관제탑 창의 ORCHESTRA 칸에서 씁니다</span></div>
+    <div class="brand">TERRARIUM <span class="sub">설정</span></div>
     <label class="run-pick">실행 폴더
       <select id="run-select"><option value="">(없음)</option></select>
       <button id="run-add" class="small" title="터미널로 만든 기존 실행 폴더를 엽니다">열기…</button>
     </label>
+    <div class="actions">
+      <span id="dirty" class="muted" hidden>저장하지 않은 변경이 있습니다</span>
+      <button id="back">돌아가기</button>
+      <button id="save" class="primary">저장</button>
+    </div>
   </header>
+
+  <dialog id="confirm" class="confirm" aria-labelledby="confirm-msg">
+    <p id="confirm-msg">저장을 하시겠습니까?</p>
+    <p id="confirm-detail" class="muted"></p>
+    <div class="row end">
+      <button id="confirm-no">취소</button>
+      <button id="confirm-yes" class="primary">저장하기</button>
+    </div>
+  </dialog>
   <nav class="tabs" role="tablist">
     <button role="tab" data-tab="accounts" aria-selected="true">계정</button>
     <button role="tab" data-tab="install">설치</button>

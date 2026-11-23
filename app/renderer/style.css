@@ -1,38 +1,46 @@
+/* 관제탑(css/style.css)과 같은 어두운 바탕·초록 강조. 오래 읽는 창이라 눈부심을 줄인다:
+   글자는 순백 대신 부드러운 회백, 형광 초록은 강조선에만, 본문은 15px·줄 간격 1.6, 대비는 본문 약 13:1, 보조 글자 약 7:1. */
 :root {
-  --bg: #f6f4ef; --panel: #ffffff; --ink: #1f2328; --muted: #6b6f76; --line: #e3dfd6;
-  --accent: #2f6f5e; --accent-ink: #ffffff; --ok: #2f7d4f; --bad: #b3261e; --warn: #9a6400; --info: #2c5d9b;
-  font-family: "Segoe UI", "Malgun Gothic", system-ui, sans-serif; font-size: 14px; color: var(--ink);
-}
-@media (prefers-color-scheme: dark) {
-  :root { --bg: #17191c; --panel: #202328; --ink: #e8e6e1; --muted: #9aa0a6; --line: #33373d; --accent: #5fb39a; --accent-ink: #0d1411; --ok: #6cc28c; --bad: #ef8a80; --warn: #e0b45c; --info: #8ab4f0; }
+  --bg: #121417; --panel: #1A1D21; --panel-2: #20242A; --ink: #E2E5EA; --muted: #A4ABB5; --line: #2F343B;
+  --accent: #4FB36A; --accent-strong: #00FF41; --accent-bg: #0F2A18; --accent-ink: #06140A;
+  --ok: #6FD08C; --bad: #FF8F86; --warn: #E9C46A; --info: #8DB8FF;
+  font-family: "Segoe UI", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif; font-size: 15px; line-height: 1.6; color: var(--ink);
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); }
-.top { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
-.brand { font-weight: 700; font-size: 16px; letter-spacing: .2px; }
-.brand .sub { font-weight: 400; color: var(--muted); margin-left: 6px; }
+::selection { background: var(--accent-bg); color: var(--ink); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+a { color: var(--info); }
+.top { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--accent-bg); background: #000000; }
+.brand { font-family: Consolas, "JetBrains Mono", monospace; font-weight: 700; font-size: 15px; letter-spacing: .14em; color: var(--accent); }
+.brand .sub { font-family: "Segoe UI", "Malgun Gothic", sans-serif; font-weight: 400; font-size: 13px; letter-spacing: 0; color: var(--muted); margin-left: 8px; }
 .run-pick { color: var(--muted); display: flex; gap: 8px; align-items: center; }
 .tabs { display: flex; gap: 4px; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .tabs button { border: 0; background: none; padding: 10px 14px; color: var(--muted); border-bottom: 2px solid transparent; border-radius: 0; }
+.tabs button:hover { color: var(--ink); }
 .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
-main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+main { padding: 24px; max-width: 1100px; margin: 0 auto; }
 .tab { display: none; }
 .tab.active { display: block; }
-h2 { font-size: 18px; margin: 0 0 8px; display: flex; align-items: center; gap: 10px; }
-h3 { font-size: 14px; margin: 18px 0 8px; }
+h2 { font-size: 19px; font-weight: 600; margin: 0 0 10px; display: flex; align-items: center; gap: 10px; }
+h3 { font-size: 13px; font-weight: 600; letter-spacing: .08em; color: var(--muted); margin: 22px 0 8px; }
 .hint { color: var(--muted); margin: 0 0 12px; line-height: 1.5; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .col { display: flex; flex-direction: column; gap: 6px; }
-input, select, textarea { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; }
+input, select, textarea { font: inherit; color: var(--ink); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+input::placeholder, textarea::placeholder { color: #7C848F; }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); outline: none; }
 input { min-width: 280px; }
 textarea { width: 100%; resize: vertical; }
-button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 7px 12px; border-radius: 6px; cursor: pointer; }
+button { font: inherit; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); padding: 8px 14px; border-radius: 6px; cursor: pointer; }
 button:hover { border-color: var(--accent); }
 button:disabled { opacity: .5; cursor: default; }
-button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+button.primary:hover { filter: brightness(1.1); }
 button.small { padding: 3px 8px; font-size: 12px; font-weight: 400; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 10px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-pre.card { font-family: Consolas, "D2Coding", monospace; font-size: 12.5px; max-height: 340px; overflow: auto; }
+pre.card { font-family: Consolas, "D2Coding", monospace; font-size: 13.5px; line-height: 1.55; max-height: 340px; overflow: auto; background: #0D0F11; }
 .muted { color: var(--muted); }
 .ok { color: var(--ok); }
 .bad { color: var(--bad); }
@@ -40,7 +48,7 @@ pre.card { font-family: Consolas, "D2Coding", monospace; font-size: 12.5px; max-
 .checks { list-style: none; padding: 0; margin: 8px 0 0; }
 .checks li { padding: 4px 0; border-top: 1px solid var(--line); }
 .checks .mark { display: inline-block; min-width: 36px; font-weight: 600; }
-.checks .fix { color: var(--ink); margin-left: 40px; font-size: 13px; }
+.checks .fix { color: var(--muted); margin-left: 40px; font-size: 14px; }
 .form { display: grid; gap: 10px; max-width: 640px; }
 .form label { display: grid; gap: 4px; color: var(--muted); }
 .key label { min-width: 300px; }
@@ -54,4 +62,13 @@ pre.card { font-family: Consolas, "D2Coding", monospace; font-size: 12.5px; max-
 .issue a:hover { text-decoration: underline; }
 .badge { font-size: 11.5px; padding: 1px 7px; border-radius: 10px; border: 1px solid currentColor; white-space: nowrap; }
 .badge.info { color: var(--info); } .badge.ok { color: var(--ok); } .badge.warn { color: var(--warn); } .badge.bad { color: var(--bad); } .badge.muted { color: var(--muted); }
-.line { font-family: Consolas, monospace; font-size: 12.5px; padding: 3px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.line { font-family: Consolas, monospace; font-size: 13.5px; padding: 3px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+/* 본창 안 설정 화면: 오른쪽 위 [돌아가기]·[저장], 저장 확인 창 */
+.top { gap: 16px; }
+.actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+#dirty { font-size: 13px; color: var(--warn); }
+.row.end { justify-content: flex-end; }
+dialog.confirm { min-width: 380px; max-width: 520px; padding: 20px 22px 16px; color: var(--ink); background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; box-shadow: 0 10px 40px rgba(0, 0, 0, .6); }
+dialog.confirm::backdrop { background: rgba(0, 0, 0, .6); }
+dialog.confirm #confirm-msg { margin: 0 0 8px; font-size: 17px; font-weight: 600; }
+dialog.confirm #confirm-detail { margin: 0 0 16px; white-space: pre-line; font-size: 14px; }

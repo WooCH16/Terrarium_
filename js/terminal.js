@@ -4,6 +4,12 @@
   const T = window.terrarium && window.terrarium.terminal;
   if (!T) return;
   const $ = (id) => document.getElementById(id);
+  // 목록 맨 아래의 설정 단추(메뉴줄을 숨겼다. 누르면 본창 안에서 설정 화면으로 바뀐다)
+  const settingsBtn = $('open-settings');
+  if (settingsBtn && T.openSettings) {
+    settingsBtn.hidden = false;
+    settingsBtn.addEventListener('click', () => T.openSettings('accounts'));
+  }
   const chat = document.querySelector('#view-main .chat');
   const box = $('term');
   $('messages').hidden = true;

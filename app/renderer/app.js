@@ -3,6 +3,14 @@ const T = window.terrarium;
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 let currentRun = '';
+// [저장]을 눌러야 적용되는 값: 실행 폴더 선택, API 키, 지정 저장소. 그 전에는 화면에만 있다.
+let savedRun = '';
+let savedRepo = '';
+const keyInputs = new Map();
+function isDirty() {
+  return currentRun !== savedRun || $('pf-repo').value.trim() !== savedRepo || [...keyInputs.values()].some((i) => i.value !== '');
+}
+function markDirty() { $('dirty').hidden = !isDirty(); }
 
 // ---- 탭 ---- (관제탑 메뉴 [설정]이 어느 탭으로 열지 정한다)
 function showTab(tab) {
@@ -13,7 +21,8 @@ function showTab(tab) {
   if (tab === 'progress') refreshProgress();
 }
 for (const b of document.querySelectorAll('[data-tab]')) b.addEventListener('click', () => showTab(b.dataset.tab));
-T.onSettingsTab(showTab);
+// 관제탑에서 [설정]을 다시 누를 때마다 저장하지 않은 입력을 버리고 지금 값을 다시 읽는다.
+T.onSettingsTab(async (tab) => { await resetAll(); showTab(tab); });
 
 // ---- 실행 폴더 ----
 async function loadRuns(select) {
@@ -22,10 +31,13 @@ async function loadRuns(select) {
   s.replaceChildren(el('option', '', '(없음)'));
   s.firstChild.value = '';
   for (const r of runs) { const o = el('option', '', r.split('/').pop()); o.value = r; s.append(o); }
-  currentRun = select ?? current ?? '';
+  savedRun = current ?? '';
+  currentRun = select ?? savedRun;
   s.value = currentRun;
+  markDirty();
 }
-$('run-select').addEventListener('change', async (e) => { currentRun = e.target.value; await T.selectRun(currentRun); refreshProgress(); });
+// 실행 폴더를 바꾸면 코디네이터 터미널이 그 폴더로 다시 뜬다. 그래서 고르기만 하고 [저장] 때 적용한다.
+$('run-select').addEventListener('change', (e) => { currentRun = e.target.value; markDirty(); refreshProgress(); });
 $('run-add').addEventListener('click', async () => { const r = await T.addRun(); if (r.ok) { await loadRuns(r.run); refreshProgress(); } else if (r.error) alert(r.error); });
 
 // ---- 계정 ----
@@ -55,24 +67,77 @@ async function loadKeys() {
   const box = $('keys');
   box.replaceChildren();
   if (!s.encryption) box.append(el('div', 'bad', '이 컴퓨터에서 암호화 저장소를 쓸 수 없어 키를 보관할 수 없습니다.'));
+  keyInputs.clear();
   for (const name of s.names) {
     const row = el('div', 'row key');
     const input = el('input');
     input.type = 'password';
-    input.placeholder = s.has[name] ? '저장됨 — 바꾸려면 새 값을 넣으세요' : '없음';
+    input.placeholder = s.has[name] ? '저장됨 — 바꾸려면 새 값을 넣고 [저장]' : '없음 — 값을 넣고 [저장]';
     input.autocomplete = 'off';
-    const save = el('button', '', '저장');
+    input.addEventListener('input', markDirty);
     const msg = el('span', s.has[name] ? 'ok' : 'muted', s.has[name] ? '있음' : '없음');
-    save.addEventListener('click', async () => {
-      const r = await T.setKey(name, input.value);
-      input.value = '';
-      if (!r.ok) { msg.className = 'bad'; msg.textContent = r.error; return; }
-      loadKeys();
-    });
-    row.append(el('label', '', `${s.labels[name]} (${name})`), input, save, msg);
+    row.append(el('label', '', `${s.labels[name]} (${name})`), input, msg);
     box.append(row);
+    keyInputs.set(name, input);
   }
+  markDirty();
 }
+
+async function loadSettings() {
+  const st = await T.getSettings();
+  savedRepo = st.designatedRepo ?? '';
+  $('pf-repo').value = savedRepo;
+  if (!$('in-repo').value) $('in-repo').value = savedRepo;
+  markDirty();
+}
+$('pf-repo').addEventListener('input', markDirty);
+
+async function resetAll() { await Promise.all([loadRuns(), loadKeys(), loadSettings()]); }
+
+// ---- 저장·돌아가기 ----
+// 묻는 창: resolve(true)면 [예] 쪽 단추를 누른 것이다.
+function ask(message, detail, yes) {
+  const d = $('confirm');
+  $('confirm-msg').textContent = message;
+  $('confirm-detail').textContent = detail ?? '';
+  $('confirm-yes').textContent = yes;
+  return new Promise((resolve) => {
+    const done = (v) => { d.close(); $('confirm-yes').onclick = null; $('confirm-no').onclick = null; d.oncancel = null; resolve(v); };
+    $('confirm-yes').onclick = () => done(true);
+    $('confirm-no').onclick = () => done(false);
+    d.oncancel = (e) => { e.preventDefault(); done(false); };
+    d.showModal();
+    $('confirm-no').focus();
+  });
+}
+function changesText() {
+  const out = [];
+  if (currentRun !== savedRun) out.push(`실행 폴더: ${currentRun ? currentRun.split('/').pop() : '(없음)'} (코디네이터 터미널이 이 폴더로 다시 뜹니다)`);
+  if ($('pf-repo').value.trim() !== savedRepo) out.push(`지정 저장소: ${$('pf-repo').value.trim() || '(비움)'}`);
+  for (const [name, i] of keyInputs) if (i.value !== '') out.push(`API 키: ${name}`);
+  return out.length ? out.join('\n') : '바뀐 값이 없습니다.';
+}
+async function save() {
+  if (!(await ask('저장을 하시겠습니까?', changesText(), '저장하기'))) return;
+  const errors = [];
+  for (const [name, i] of keyInputs) {
+    if (i.value === '') continue;
+    const r = await T.setKey(name, i.value);
+    if (r.ok) i.value = ''; else errors.push(`${name}: ${r.error}`);
+  }
+  const repo = $('pf-repo').value.trim();
+  if (repo !== savedRepo) { const r = await T.saveSettings({ designatedRepo: repo }); if (r.ok) savedRepo = repo; else errors.push(r.error); }
+  if (currentRun !== savedRun) { const r = await T.selectRun(currentRun); if (r.ok) savedRun = currentRun; else errors.push('실행 폴더를 고르지 못했습니다.'); }
+  if (errors.length) { await loadKeys(); markDirty(); alert(`저장하지 못한 것이 있습니다.\n${errors.join('\n')}`); return; }
+  await T.closeSettings();
+}
+async function back() {
+  if (isDirty() && !(await ask('저장하지 않고 돌아갈까요?', changesText(), '돌아가기'))) return;
+  await T.closeSettings();
+}
+$('save').addEventListener('click', save);
+$('back').addEventListener('click', back);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('confirm').open) back(); });
 
 // ---- 설치 ----
 $('in-pick').addEventListener('click', async () => { const p = await T.pickProject(); if (p) $('in-project').value = p; });
@@ -130,6 +195,5 @@ async function refreshProgress() {
 $('pg-refresh').addEventListener('click', refreshProgress);
 setInterval(() => { if (document.querySelector('#tab-progress.active')) refreshProgress(); }, 60000);
 
-loadRuns();
-loadKeys();
+resetAll();
 showTab(new URLSearchParams(location.search).get('tab') || 'accounts');

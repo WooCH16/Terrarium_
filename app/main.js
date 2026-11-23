@@ -1,7 +1,7 @@
 // Terrarium 데스크톱 앱의 메인 프로세스(ADR 0010).
 // 렌더러는 Node에 직접 닿지 않는다(contextIsolation, sandbox, preload.cjs의 좁은 API만).
 // 창은 둘이다: 소유자가 만든 관제탑 화면(본창, ORCHESTRA 칸에 코디네이터 터미널)과 설정 창(계정·설치·진행).
-import { app, BrowserWindow, Menu, ipcMain, safeStorage, dialog, shell } from 'electron';
+import { app, BrowserWindow, WebContentsView, Menu, ipcMain, safeStorage, dialog, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import { readdirSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -56,7 +56,7 @@ const xtermBase = pathToFileURL(join(here, 'node_modules', '@xterm')).href;
 ipcMain.on('term:base', (e) => { e.returnValue = xtermBase; });
 
 let win = null; // 관제탑(본창)
-let settingsWin = null;
+let settingsView = null; // 설정 화면: 본창 안에 겹쳐 띄운다(새 창이 아니다). 뒤의 관제탑·코디네이터 터미널은 그대로 산다
 let term = null;
 const toTower = (channel, payload) => { if (win && !win.isDestroyed()) win.webContents.send(channel, payload); };
 const webPreferences = () => ({ preload: join(here, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false });
@@ -75,9 +75,11 @@ function fitTower() {
 
 function createWindow() {
   win = new BrowserWindow({ width: 1320, height: 900, minWidth: 660, minHeight: 450, title: 'Terrarium', backgroundColor: '#3A3D42', webPreferences: webPreferences() });
+  // 메뉴줄은 숨긴다(설정은 관제탑 목록 맨 아래 단추). 메뉴의 단축키(다시 읽기, 개발자 도구, 끝내기)는 그대로 쓴다.
+  win.setMenuBarVisibility(false);
   win.loadFile(towerPage);
   guard(win);
-  win.on('resize', fitTower);
+  win.on('resize', () => { fitTower(); fitSettings(); });
   win.webContents.on('did-finish-load', fitTower);
   win.on('closed', () => { win = null; });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -92,19 +94,33 @@ function createWindow() {
   ]));
 }
 
-// 설정 창: 계정·설치·진행(관제탑 배치에 없는 화면은 여기에 둔다).
-function openSettings(tab = 'accounts', { show = true } = {}) {
-  if (settingsWin && !settingsWin.isDestroyed()) {
-    settingsWin.focus();
-    settingsWin.webContents.send('settings:tab', tab);
-    return settingsWin;
+// 설정 화면: 계정·설치·진행(관제탑 배치에 없는 화면은 여기에 둔다).
+// 관제탑 목록의 [설정] 단추가 부르면 본창 안에서 화면만 바뀐다. [저장] 뒤나 [돌아가기]로 관제탑에 돌아온다.
+function fitSettings() {
+  if (!settingsView || !win || win.isDestroyed()) return;
+  const [w, h] = win.getContentSize();
+  settingsView.setBounds({ x: 0, y: 0, width: w, height: h });
+}
+function openSettings(tab = 'accounts') {
+  if (!win || win.isDestroyed()) return null;
+  if (!settingsView || settingsView.webContents.isDestroyed()) {
+    settingsView = new WebContentsView({ webPreferences: webPreferences() });
+    settingsView.setBackgroundColor('#121417');
+    guard(settingsView);
+    settingsView.webContents.loadFile(join(here, 'renderer', 'index.html'), { query: { tab } });
+  } else {
+    // 다시 열 때마다 저장하지 않은 입력을 버리고 지금 값을 다시 읽는다.
+    settingsView.webContents.send('settings:tab', tab);
   }
-  settingsWin = new BrowserWindow({ width: 1000, height: 760, show, title: 'Terrarium 설정', parent: win ?? undefined, backgroundColor: '#f6f4ef', webPreferences: webPreferences() });
-  settingsWin.setMenu(null);
-  settingsWin.loadFile(join(here, 'renderer', 'index.html'), { query: { tab } });
-  guard(settingsWin);
-  settingsWin.on('closed', () => { settingsWin = null; });
-  return settingsWin;
+  win.contentView.addChildView(settingsView);
+  fitSettings();
+  settingsView.webContents.focus();
+  return settingsView;
+}
+function closeSettings() {
+  if (!settingsView || !win || win.isDestroyed()) return;
+  win.contentView.removeChildView(settingsView);
+  win.webContents.focus();
 }
 
 // ---- 계정 (#36) ----
@@ -201,8 +217,8 @@ ipcMain.handle('term:start', async (_e, { fresh = false, cols, rows } = {}) => {
   if (term?.pty) return { ok: true, running: true };
   const prefs = readPrefs();
   const run = prefs.currentRun;
-  if (!allowedRun(run)) return { ok: false, error: '실행 폴더가 없습니다. 메뉴 [설정 > 실행 폴더 설치]에서 설치하거나 기존 폴더를 고르세요.' };
-  if (prefs.preflightOk !== true) return { ok: false, error: '사전 점검을 먼저 통과하세요. 메뉴 [설정 > 계정]에서 합니다(워커 모델 계정 1곳 이상과 Jev 키가 필요합니다).' };
+  if (!allowedRun(run)) return { ok: false, error: '실행 폴더가 없습니다. 왼쪽 목록 맨 아래 [설정]의 설치 탭에서 설치하거나 기존 폴더를 고른 뒤 [저장]하세요.' };
+  if (prefs.preflightOk !== true) return { ok: false, error: '사전 점검을 먼저 통과하세요. 왼쪽 목록 맨 아래 [설정]의 계정 탭에서 합니다(워커 모델 계정 1곳 이상과 Jev 키가 필요합니다).' };
   const c = await claudeBin();
   if (!c) return { ok: false, error: 'Claude Code(claude)를 찾지 못했습니다. 설치하고 로그인하세요.' };
   // 키는 환경 변수로만 넘긴다. 오퍼레이터를 띄울 claude 실행 파일도 알려 준다(.cmd 셔틀은 못 쓴다).
@@ -222,6 +238,16 @@ ipcMain.handle('term:start', async (_e, { fresh = false, cols, rows } = {}) => {
 ipcMain.on('term:input', (_e, data) => { if (typeof data === 'string' && data.length <= 100000) term?.write(data); });
 ipcMain.on('term:resize', (_e, { cols, rows } = {}) => term?.resize(cols, rows));
 ipcMain.handle('settings:open', (_e, { tab } = {}) => { openSettings(['accounts', 'install', 'progress'].includes(tab) ? tab : 'accounts'); return { ok: true }; });
+ipcMain.handle('settings:close', () => { closeSettings(); return { ok: true }; });
+// 설정 화면이 기억하는 값: 지정 저장소 이름(사전 점검·설치 칸을 미리 채운다). 저장은 [저장]을 눌렀을 때만.
+const REPO_RE = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
+ipcMain.handle('settings:get', () => ({ designatedRepo: readPrefs().designatedRepo ?? '' }));
+ipcMain.handle('settings:save', (_e, { designatedRepo } = {}) => {
+  const v = String(designatedRepo ?? '').trim();
+  if (v !== '' && !REPO_RE.test(v)) return { ok: false, error: '지정 저장소는 <소유자>/<이름> 모양이어야 합니다.' };
+  writePrefs({ designatedRepo: v });
+  return { ok: true };
+});
 
 // ---- 진행 표시 (#40) ----
 // 관제탑 카드·팀·통합·사무실(결정 8-19): 지금 실행 폴더의 상태를 읽어 관제탑 모양으로 넘긴다. 읽기만 한다.
@@ -274,13 +300,42 @@ async function smoke(dir) {
     await wait(Number(secs) * 1000);
     await shot(win, `tower-step${i + 1}`);
   }
+  // 본창 안 설정 화면: 열기 → [저장] → "저장하기" → 관제탑으로 돌아오는지 누름으로 확인해 settings-flow.json에 남긴다.
+  const attached = () => win.contentView.children.includes(settingsView);
+  const flow = {};
+  const v = openSettings('accounts');
+  await new Promise((r) => v.webContents.once('did-finish-load', r));
+  await wait(800);
+  flow.openedInWindow = attached();
+  const js = (code) => v.webContents.executeJavaScript(code);
+  await js("document.getElementById('pf-repo').value = 'owner/smoke-issues'; document.getElementById('pf-repo').dispatchEvent(new Event('input'))");
+  flow.dirtyShown = await js("!document.getElementById('dirty').hidden");
+  await js("document.getElementById('save').click()");
+  await wait(300);
+  flow.confirm = await js("({ open: document.getElementById('confirm').open, msg: document.getElementById('confirm-msg').textContent, yes: document.getElementById('confirm-yes').textContent, detail: document.getElementById('confirm-detail').textContent })");
+  await js("document.getElementById('confirm-yes').click()");
+  await wait(800);
+  flow.closedAfterSave = !attached();
+  flow.savedRepo = readPrefs().designatedRepo ?? null;
+  openSettings('install');
+  await wait(500);
+  flow.reopenedTab = await js("document.querySelector('[data-tab][aria-selected=\"true\"]').dataset.tab");
+  flow.repoPrefilled = await js("document.getElementById('pf-repo').value");
+  await js("document.getElementById('back').click()");
+  await wait(300);
+  flow.closedOnBackWithoutChanges = !attached();
+  writeFileSync(`${dir}/settings-flow.json`, JSON.stringify(flow, null, 2));
+  // 화면 그림은 같은 설정 페이지를 숨긴 창에 따로 띄워 찍는다(본창 안 보기는 숨긴 창에서 찍히지 않는다).
+  const sw = new BrowserWindow({ width: 1320, height: 900, show: false, webPreferences: webPreferences() });
+  await sw.loadFile(join(here, 'renderer', 'index.html'), { query: { tab: 'accounts' } });
   for (const tab of ['accounts', 'install', 'progress']) {
-    const s = openSettings(tab, { show: false });
-    if (tab === 'accounts') await new Promise((r) => s.webContents.once('did-finish-load', r));
-    s.webContents.send('settings:tab', tab);
-    await wait(tab === 'progress' ? 4000 : 600);
-    await shot(s, tab);
+    sw.webContents.send('settings:tab', tab);
+    await wait(tab === 'progress' ? 4000 : 800);
+    await shot(sw, tab);
   }
+  await sw.webContents.executeJavaScript("document.getElementById('save').click()");
+  await wait(400);
+  await shot(sw, 'confirm');
   stopTerm();
   app.quit();
 }
