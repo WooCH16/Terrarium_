@@ -1353,11 +1353,11 @@ test('markedPids: /proc에서 이 실행의 표지를 가진 프로세스만 고
   const proc = mkdtempSync(join(tmpdir(), 'fakeproc-'));
   try {
     const put = (pid, env) => { mkdirSync(join(proc, pid)); writeFileSync(join(proc, pid, 'environ'), env.join('\0') + '\0'); };
-    put('101', ['HOME=/x', 'HARNESS_TEST_SWEEP=abc']);
-    put('102', ['HARNESS_TEST_SWEEP=other']);
-    put('103', ['HARNESS_TEST_SWEEP=abcd']);
-    put('104', ['HARNESS_TEST_SWEEP=abc']);
-    put('self', ['HARNESS_TEST_SWEEP=abc']);
+    put('101', ['HOME=/x', 'TERRARIUM_TEST_SWEEP=abc']);
+    put('102', ['TERRARIUM_TEST_SWEEP=other']);
+    put('103', ['TERRARIUM_TEST_SWEEP=abcd']);
+    put('104', ['TERRARIUM_TEST_SWEEP=abc']);
+    put('self', ['TERRARIUM_TEST_SWEEP=abc']);
     mkdirSync(join(proc, '105'));
     assert.deepEqual(markedPids('abc', { procDir: proc, self: 104 }).sort(), [101]);
     assert.deepEqual(markedPids('', { procDir: proc }), []);

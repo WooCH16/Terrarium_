@@ -344,12 +344,12 @@ async function withTestClone({ git, ctx, commit }, fn) {
 
 // 시험이 끝난 뒤 남은 자손 프로세스를 정리한다. win32: 시험 시작 뒤에 만들어졌고 부모가 root인(이제 죽은 root의 pid를 부모로 가진) 프로세스와 그 자손.
 // 부모가 먼저 죽는 이중 분리(A가 B를 띄우고 죽는 식)는 따라가지 못한다(알려진 한계). 그 밖: 같은 프로세스 그룹을 종료하고,
-// /proc이 있으면(Linux) 환경 변수에 이 실행의 표지(HARNESS_TEST_SWEEP=<marker>)를 가진 프로세스도 종료한다.
+// /proc이 있으면(Linux) 환경 변수에 이 실행의 표지(TERRARIUM_TEST_SWEEP=<marker>)를 가진 프로세스도 종료한다.
 // detached 자손은 새 프로세스 그룹으로 빠져나가고 root가 죽으면 부모가 바뀌어 그룹·부모로는 찾지 못하기 때문이다.
 // 표지를 지운 프로세스는 따라가지 못한다(알려진 한계).
 export function markedPids(marker, { procDir = '/proc', self = process.pid } = {}) {
   if (!marker || !existsSync(procDir)) return [];
-  const needle = `HARNESS_TEST_SWEEP=${marker}`;
+  const needle = `TERRARIUM_TEST_SWEEP=${marker}`;
   const out = [];
   let names = [];
   try { names = readdirSync(procDir); } catch { return []; }
@@ -404,7 +404,7 @@ export function runNodeTests(cwd, { timeoutMs, maxBytes = DEFAULT_OUTPUT_CAP, sp
       home = mkdtempSync(`${fwd(dirname(cwd))}/testhome-`);
       mkdirSync(`${home}/tmp`);
       writeFileSync(`${home}/gitconfig`, '');
-      const childEnv = { ...testEnv(env), HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: home, APPDATA: home, LOCALAPPDATA: home, TEMP: `${home}/tmp`, TMP: `${home}/tmp`, TMPDIR: `${home}/tmp`, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: `${home}/gitconfig`, HARNESS_TEST_SWEEP: marker };
+      const childEnv = { ...testEnv(env), HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: home, APPDATA: home, LOCALAPPDATA: home, TEMP: `${home}/tmp`, TMP: `${home}/tmp`, TMPDIR: `${home}/tmp`, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: `${home}/gitconfig`, TERRARIUM_TEST_SWEEP: marker };
       child = spawn(process.execPath, ['--test', ...(process.allowedNodeEnvironmentFlags.has('--test-isolation') ? ['--test-isolation=none'] : [])], { cwd, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' });
     } catch { finish({ ok: false, code: -1 }); return; }
     const onData = (chunk) => {
