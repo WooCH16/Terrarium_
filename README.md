@@ -124,6 +124,8 @@ node scripts/check.js          # CI 검사
 
 - 이슈·PR 보내는 방법: [CONTRIBUTING.md](CONTRIBUTING.md)
 - 보안 문제는 공개 이슈 대신 비공개로: [SECURITY.md](SECURITY.md)
+- 행동 강령: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- 변경 기록: [CHANGELOG.md](CHANGELOG.md)
 
 ## 라이선스
 

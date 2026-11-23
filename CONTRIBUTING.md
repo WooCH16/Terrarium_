@@ -2,6 +2,8 @@
 
 Terrarium에 관심 가져 주셔서 고맙습니다. 이 문서는 이슈와 PR을 보내는 방법을 짧게 적습니다. English summary is at the bottom.
 
+참여하는 모든 분은 [행동 강령](CODE_OF_CONDUCT.md)을 지켜 주세요.
+
 ## 시작하기
 
 1. 저장소를 포크하고 받습니다.

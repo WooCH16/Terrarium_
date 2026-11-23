@@ -124,6 +124,8 @@ node scripts/check.js          # CI checks
 
 - How to send issues and PRs: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Report security problems privately, not in public issues: [SECURITY.md](SECURITY.md)
+- Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- Changelog: [CHANGELOG.md](CHANGELOG.md) (Korean)
 
 ## License
 
