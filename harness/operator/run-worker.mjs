@@ -138,7 +138,7 @@ function releasePid(file, pid, now) {
 // ---- 워커 기록(결정 8-29): handoffs/h<N>/workers.jsonl에 워커 호출마다 start·end 한 줄씩 덧붙인다. 관제탑 상세 창이 읽는다. ----
 // handoffs/ 아래라 오퍼레이터·코디네이터 훅이 쓰기를 막는다. 쓰기 실패는 워커 결과를 바꾸지 않는다.
 export const workersFile = (run, handoff) => `${run}/handoffs/${handoff}/workers.jsonl`;
-function logWorker(run, handoff, entry, now) {
+export function logWorker(run, handoff, entry, now) {
   try { appendFileSync(workersFile(run, handoff), `${JSON.stringify({ ...entry, time: now().toISOString() })}\n`); } catch { /* 기록 실패는 결과를 바꾸지 않는다 */ }
 }
 

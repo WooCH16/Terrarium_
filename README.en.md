@@ -38,34 +38,36 @@ There are two ways to use the harness. Either way, the coordinator is the same i
 
 | | App | Claude CLI |
 |---|---|---|
-| Where you talk to the coordinator | The ORCHESTRA pane of the app's control-tower screen | `claude` started in your own terminal |
-| Preflight check, run folder setup | The [설정] (Settings) button at the bottom of the tower's left list | Run `preflight.mjs` and `setup.mjs` yourself |
+| Where you talk to the coordinator | The coordinator window in the middle of the app's control-tower screen | `claude` started in your own terminal |
+| Preflight check, run folder setup | The gear at the tower's top right → [설정 열기] (Open settings) | Run `preflight.mjs` and `setup.mjs` yourself |
 | API keys (`TYPESAFE_API_KEY`, `GEMINI_API_KEY`) | Kept in this computer's encrypted storage and passed to the coordinator as environment variables | `.env` at the repository root |
 | Checking progress | [설정 > 진행 기록] (issues, handoffs, verdicts; read-only) | GitHub issues and the record files in the run folder |
 | Good for | Installing and using it without a terminal | Changing or testing the harness, or not installing the app |
 
 Both need Node 22 or later, git, [GitHub CLI](https://cli.github.com/) (`gh auth login`), [Claude Code](https://claude.com/claude-code) (logged in), and Pi (`npm install -g @earendil-works/pi-coding-agent`, then `pi auth login anthropic`, and `pi auth login meta` for the muse worker). The designated repository must be private.
 
-You can open the same run folder from either one. To open a run folder made in the terminal, use **열기…** (Open) next to the run folder picker at the top of the app's settings window. Do not run two coordinators on one run folder at once: opening it in the app and the terminal together makes handoffs collide.
+You can open the same run folder from either one. To open a run folder made in the terminal, use **다른 폴더 열기…** (Open another folder) in the run folder button at the tower's top left (or **열기…** at the top of the settings window). Do not run two coordinators on one run folder at once: opening it in the app and the terminal together makes handoffs collide.
 
 ### 1. App
 
-`app/` holds a Windows desktop app (ADR 0010, 0011). The main window is the control-tower screen, and the coordinator terminal opens in its ORCHESTRA pane. The tower's operator cards, team, total, and office views show the run folder's five most recent handoffs (one handoff per card, its issues as workers, bars showing the issue label stage; read-only).
+`app/` holds a Windows desktop app (ADR 0010, 0011). The main window is the control-tower screen (`app/tower/`). The real Claude Code coordinator terminal runs inside the coordinator window in the middle, and only the sessions the coordinator actually calls appear around it: advisors on the right, one operator window per handoff (named by its team), and below it one worker window per issue that handoff started a worker for. Teams that were not handed work and issues not in a handoff do not appear. The screen only reads the run folder's records (`guard.log`, `advice-log.jsonl`, `handoffs/`; `app/lib/flow.mjs`, event shapes in [docs/app-screen.md](docs/app-screen.md)). Drag the background to pan, use the wheel to zoom, and double-click an operator window to see that handoff's workers and models. Usage in the top bar comes from the coordinator's statusline (Claude Pro or Max subscriptions, after the first response).
 
 ```bash
 cd app
 npm install
 npm start            # run in development
+npm test             # app logic tests (no Electron)
+npm run smoke        # smoke test: the real app window + a fake coordinator (no models or network); screenshots in app/out/smoke/
 npm run dist         # Windows installer: app/dist/Terrarium Setup <version>.exe
 ```
 
-Press **[설정]** (Settings) at the bottom of the tower's left list to switch the main window to the settings screen. The run folder choice, API keys, and designated repository take effect only after **[저장]** (Save) → **저장하기** (Save), which also returns you to the tower. **[돌아가기]** (Back) or Esc returns without saving.
+Press the gear at the tower's top right, then **[설정 열기]** (Open settings), to switch the main window to the settings screen (계정 관리 and 진행 기록 in the profile button open the same screen). The run folder choice, API keys, and designated repository take effect only after **[저장]** (Save) → **저장하기** (Save), which also returns you to the tower. **[돌아가기]** (Back) or Esc returns without saving.
 
 First use:
 
 1. **[설정] → 계정** (Accounts tab): log in to Claude Code, GitHub, and Pi with the login buttons. Enter API keys, type the designated repository (`<owner>/<name>`), and press **사전 점검** (preflight check). The coordinator terminal opens only after this check passes.
 2. **[설정] → 설치** (Run folder setup tab): enter the designated repository, a run folder name, and the target project (a git folder with a `main` branch; leave empty for the sample memo program), then press **설치** (Install). If the designated repository does not exist, the app asks whether to create it as private (if the step 1 check failed because the repository was missing, press the preflight check again after it is created).
-3. **ORCHESTRA pane** in the main window: when the terminal appears, talk to the coordinator. The first time, Claude Code asks whether you trust the folder. **The default selection is "No", so pressing Enter alone chooses No. Move down to "Yes, I trust this folder" and press Enter.** With No, the allow list does not apply and the harness hooks may not run.
+3. **Coordinator window** in the middle of the main window: when the terminal appears, talk to the coordinator. The first time, Claude Code asks whether you trust the folder. **The default selection is "No", so pressing Enter alone chooses No. Move down to "Yes, I trust this folder" and press Enter.** With No, the allow list does not apply and the harness hooks may not run.
    - Esc interrupts a turn, and Claude Code commands such as `/compact` work as usual. Pressing Esc while a handoff is running does not stop the handoff; on the next turn the coordinator picks it up again. To stop a handoff, ask the coordinator to stop it (`stop-operator`), not Esc.
    - When the coordinator exits, press Enter in the terminal to reopen the same conversation, or N for a new one.
    - When you restart the app, it reopens the previous conversation for that run folder.
@@ -107,9 +109,8 @@ node harness/e2e/verify.mjs --run C:/Users/<you>/my-run --since <start time ISO>
 | Path | Contents |
 |---|---|
 | `harness/` | Harness code and role documents. Each role (coordinator, advisor, operator, worker, reviewer) has `harness/<role>/AGENT.md` and a design document `docs/<role>.md` (Korean). The coordinator document becomes the run folder's `CLAUDE.md` |
-| `app/` | Desktop app (Electron) |
+| `app/` | Desktop app (Electron). The control-tower screen is `app/tower/`, the settings screen `app/renderer/` |
 | `docs/` | Definition, designs, ADRs, checks and run records (`docs/checks/`) |
-| `index.html`, `css/`, `js/`, `assets/` | Control-tower screen. It is the app's main window; opened in a browser it runs on mock data (`js/terminal.js` only acts inside the app) |
 | `scripts/` | Test runner (`test.mjs`) and CI checks (`check.js`) |
 
 ## Tests

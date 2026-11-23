@@ -95,7 +95,8 @@ function writeLog(file, input, result) {
       tool_name: input.tool_name,
       allow: result.allow,
       reason: result.reason,
-      summary: String(input.tool_input?.command ?? input.tool_input?.file_path ?? '').slice(0, 200),
+      // Agent(어드바이저 호출)는 명령·파일이 없어 설명을 남긴다. 앱의 관제탑이 어드바이저 칸에 보인다(app/lib/flow.mjs).
+      summary: String(input.tool_input?.command ?? input.tool_input?.file_path ?? input.tool_input?.description ?? '').slice(0, 200),
     }) + '\n');
   } catch {
     // 의도적으로 삼킨다: 로그를 못 써도 판정은 그대로 따른다(로그 실패가 허용·거부를 바꾸지 않는다).

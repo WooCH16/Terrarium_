@@ -33,7 +33,7 @@ Terrarium에 관심 가져 주셔서 고맙습니다. 이 문서는 이슈와 PR
 - 동작을 바꾸면 시험을 함께 더합니다(먼저 실패하는 시험을 쓰고 고칩니다).
 - 설계를 바꾸는 변경은 `docs/adr/`의 결정 기록과 `docs/checks/owner-decisions.md`를 먼저 읽어 주세요. 기존 결정과 다르면 PR 설명에 이유를 적어 주세요.
 - 문서는 지금 문체(짧은 한국어 문장, 결정 번호 표기)를 따릅니다. 영어 PR도 괜찮습니다.
-- 관제탑 화면(`index.html`, `css/`, `js/`, `assets/`)의 디자인을 크게 바꾸려면 먼저 이슈로 의논해 주세요.
+- 관제탑 화면(`app/tower/`)의 디자인을 크게 바꾸려면 먼저 이슈로 의논해 주세요. 바꾼 뒤에는 `app`에서 `npm run smoke`가 통과해야 합니다.
 
 ## 올리면 안 되는 것
 
@@ -55,7 +55,7 @@ Terrarium에 관심 가져 주셔서 고맙습니다. 이 문서는 이슈와 PR
 
 - Requires Node.js 24+. Run `node scripts/test.mjs --fast` and `node scripts/check.js` before opening a PR. For harness changes, run only the related test files with `node --test --test-concurrency=1`.
 - One change per PR. Add tests for behavior changes. Read `docs/adr/` before changing the design.
-- Discuss large changes to the control-tower UI (`index.html`, `css/`, `js/`, `assets/`) in an issue first.
+- Discuss large changes to the control-tower UI (`app/tower/`) in an issue first. After a change, `npm run smoke` in `app` must pass.
 - This repository is public: never commit keys, tokens, `.env`, personal paths, emails or private repository names. Use fake examples such as `owner/app`.
 - Report security issues privately, see [SECURITY.md](SECURITY.md).
 - Contributions are licensed under the repository's [MIT License](LICENSE).

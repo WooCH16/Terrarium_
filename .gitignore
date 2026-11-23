@@ -30,3 +30,6 @@ HANDOFF.md
 # Claude Code local settings
 .claude/settings.local.json
 harness/test/.cli-trap.log
+
+# 앱 스모크 시험 결과(그림·결과 파일에 이 컴퓨터의 경로와 계정 이름이 들어간다)
+app/out/

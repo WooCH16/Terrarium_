@@ -18,16 +18,17 @@ export function coordinatorEnv(env) {
 }
 
 // 세션 id를 앱이 정해 둔다: --continue("이 폴더의 가장 최근 대화")는 시험용 -p 실행이나 오퍼레이터 세션을 잡을 수 있다.
-export function coordinatorArgs({ resume, sessionId } = {}) {
+// settingsFile: 앱이 더하는 설정 파일(statusline 명령만 담는다. 실행 폴더의 훅·권한은 그대로다).
+export function coordinatorArgs({ resume, sessionId, settingsFile } = {}) {
   for (const id of [resume, sessionId]) if (id !== undefined && !UUID.test(id)) throw new Error('세션 id 모양이 올바르지 않습니다.');
-  return ['--setting-sources', 'project,local', '--allowedTools', TOOLS, ...(resume ? ['--resume', resume] : ['--session-id', sessionId])];
+  return ['--setting-sources', 'project,local', '--allowedTools', TOOLS, ...(settingsFile ? ['--settings', settingsFile] : []), ...(resume ? ['--resume', resume] : ['--session-id', sessionId])];
 }
 
 // 터미널 하나. ptySpawn·onData·onExit를 받아 시험할 수 있다.
 export class CoordinatorTerminal {
   // onSession(id): 띄울 때마다 세션 id를 알린다(앱이 실행 폴더별로 기억한다).
-  constructor({ run, bin, preArgs = [], env, ptySpawn, onData, onExit, onSession = () => {}, resume, cols = 90, rows = 20, newId = randomUUID }) {
-    Object.assign(this, { run, bin, preArgs, env, ptySpawn, onData, onExit, onSession, cols, rows, newId });
+  constructor({ run, bin, preArgs = [], env, ptySpawn, onData, onExit, onSession = () => {}, resume, cols = 90, rows = 20, newId = randomUUID, settingsFile }) {
+    Object.assign(this, { run, bin, preArgs, env, ptySpawn, onData, onExit, onSession, cols, rows, newId, settingsFile });
     this.resume = resume && UUID.test(resume) ? resume : undefined;
     this.sessionId = this.resume ?? newId();
     this.pty = null;
@@ -36,7 +37,7 @@ export class CoordinatorTerminal {
   start() {
     if (this.pty) return this.sessionId;
     const resuming = Boolean(this.resume);
-    const args = coordinatorArgs(resuming ? { resume: this.resume } : { sessionId: this.sessionId });
+    const args = coordinatorArgs({ ...(resuming ? { resume: this.resume } : { sessionId: this.sessionId }), settingsFile: this.settingsFile });
     const p = this.ptySpawn(this.bin, [...this.preArgs, ...args], { name: 'xterm-256color', cols: this.cols, rows: this.rows, cwd: this.run, env: this.env });
     this.pty = p;
     this.onSession(this.sessionId);

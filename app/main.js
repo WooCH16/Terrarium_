@@ -1,18 +1,18 @@
 // Terrarium 데스크톱 앱의 메인 프로세스(ADR 0010).
 // 렌더러는 Node에 직접 닿지 않는다(contextIsolation, sandbox, preload.cjs의 좁은 API만).
-// 창은 둘이다: 소유자가 만든 관제탑 화면(본창, ORCHESTRA 칸에 코디네이터 터미널)과 설정 창(계정·설치·진행).
+// 본창은 관제탑 화면(app/tower: 코디네이터 창 안에 진짜 Claude Code 터미널, 하달된 만큼만 뜨는 Operator·Worker 창)이고,
+// 설정 화면(계정·설치·진행)은 본창 위에 겹쳐 띄운다.
 import { app, BrowserWindow, WebContentsView, Menu, ipcMain, safeStorage, dialog, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import { readdirSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import pty from 'node-pty';
 import { CoordinatorTerminal, coordinatorEnv } from './lib/terminal.mjs';
 import { KeyStore, KEY_NAMES, KEY_LABELS } from './lib/keys.mjs';
 import { readStatus } from './lib/status.mjs';
-import { towerView } from './lib/tower.mjs';
+import { FlowTracker, readFlowSnapshot } from './lib/flow.mjs';
 import { install, checkInstallInput, originRepo } from './lib/install.mjs';
-import { listDir, watchFolder } from './lib/files.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fwd = (p) => String(p).replace(/\\/g, '/');
@@ -42,20 +42,34 @@ const ghExec = async (args) => { const r = await exec('gh', args, { timeout: 300
 // 프로세스 트리 끝내기(Windows): 코디네이터가 띄운 하달 대기 등이 남지 않게.
 const killTree = (pid) => { if (pid) try { spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); } catch { /* 이미 끝남 */ } };
 
+// 사용자의 node 실행 파일(절대 경로). 의사 터미널(node-pty)은 이름만으로는 실행 파일을 찾지 못한다("File not found").
+let nodePath = null;
+async function nodeBin() {
+  if (nodePath) return nodePath;
+  const r = await exec(process.platform === 'win32' ? 'where' : 'which', ['node'], { timeout: 10000 });
+  nodePath = (r.stdout.split(/\r?\n/).map((l) => l.trim()).find((l) => /node(\.exe)?$/i.test(l))) || 'node';
+  return nodePath;
+}
 async function claudeBin() {
+  // 시험용(설치본에서는 무시): 진짜 claude 대신 가짜 코디네이터(app/test/fake-coordinator.mjs)를 띄운다.
+  if (!app.isPackaged && process.env.TERRARIUM_FAKE_CLAUDE) return { bin: await nodeBin(), args: [process.env.TERRARIUM_FAKE_CLAUDE] };
   const { launcher } = await import(pathToFileURL(`${harnessDir}/operator/model-exec.mjs`).href);
   const l = launcher('claude', process.env);
   if (!l) return null;
   // npm 셔틀이 .js 진입 파일을 가리키면 launcher는 현재 실행 파일(여기서는 Electron)을 쓴다: 사용자의 node로 바꾼다.
-  return l.bin === process.execPath ? { bin: 'node', args: l.args } : l;
+  return l.bin === process.execPath ? { bin: await nodeBin(), args: l.args } : l;
 }
 
-// 관제탑 화면은 저장소 루트의 것(index.html, css/, js/, assets/)을 그대로 쓴다. 설치본은 resources/tower에 복사된다.
-const towerPage = app.isPackaged ? join(process.resourcesPath, 'tower', 'index.html') : join(here, '..', 'index.html');
+// 관제탑 화면(app/tower). React·글꼴·xterm은 앱 의존성(node_modules)에서 읽는다(설치본은 app.asar 안).
+const towerPage = join(here, 'tower', 'index.html');
+// statusline 명령은 사용자의 node가 돌리므로 설치본에서는 asar 밖(app.asar.unpacked)의 파일을 가리킨다.
+const statuslineScript = fwd(join(here, 'lib', 'statusline.mjs')).replace('/app.asar/', '/app.asar.unpacked/');
+const statusFile = () => `${dataDir()}/coordinator-status.json`;
 // xterm은 앱의 의존성에서 읽는다(설치본은 app.asar 안).
 const xtermBase = pathToFileURL(join(here, 'node_modules', '@xterm')).href;
 ipcMain.on('term:base', (e) => { e.returnValue = xtermBase; });
 
+let flow = null; // 관제탑 세션 흐름(하네스 기록 → 화면 이벤트)
 let win = null; // 관제탑(본창)
 let settingsView = null; // 설정 화면: 본창 안에 겹쳐 띄운다(새 창이 아니다). 뒤의 관제탑·코디네이터 터미널은 그대로 산다
 let term = null;
@@ -67,26 +81,22 @@ function guard(w) {
   w.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
 }
 
-// 관제탑은 880x600 무대다. CSS zoom 대신 창의 확대 배율로 맞춘다(xterm의 글자 칸 계산과 마우스 선택이 CSS zoom에서 어긋난다).
-// 오른쪽 폴더 패널 자리(css .files의 최소 폭 + 여백)를 늘 남긴다: 창 모드에서도 패널이 보인다. 넓은 창에서는 패널이 남는 폭을 채운다.
-const STAGE_W = 160 + 720 + 196; // 목록 + 가운데 기준 폭 + 파일 패널 기본 폭. 패널을 끌어 넓혀도 배율은 그대로고 가운데가 줄어든다
-function fitTower() {
-  if (!win || win.isDestroyed()) return;
-  const [w, h] = win.getContentSize();
-  win.webContents.setZoomFactor(Math.max(0.4, Math.min(2, w / STAGE_W, h / 600)));
+// 관제탑 화면은 스스로 확대·축소한다(휠, 세션이 뜨면 맞춤). 창 배율은 건드리지 않는다.
+function towerWindow({ show = true } = {}) {
+  const w = new BrowserWindow({ width: 1440, height: 900, minWidth: 720, minHeight: 520, show, title: 'Terrarium', backgroundColor: '#0e0d0b', webPreferences: { ...webPreferences(), backgroundThrottling: false } });
+  w.setMenuBarVisibility(false);
+  guard(w);
+  w.on('resize', fitSettings);
+  // 화면을 (다시) 읽으면 지금 실행의 세션을 다시 보낸다.
+  w.webContents.on('did-finish-load', () => flow?.replay());
+  w.on('closed', () => { if (win === w) win = null; });
+  return w;
 }
-
 function createWindow() {
-  win = new BrowserWindow({ width: 1320, height: 900, minWidth: 660, minHeight: 450, title: 'Terrarium', backgroundColor: '#3A3D42', webPreferences: webPreferences() });
-  // 메뉴줄은 숨긴다(설정은 관제탑 목록 맨 아래 단추). 메뉴의 단축키(다시 읽기, 개발자 도구, 끝내기)는 그대로 쓴다.
-  win.setMenuBarVisibility(false);
+  win = towerWindow();
+  // 메뉴줄은 숨긴다(설정은 오른쪽 위 톱니). 메뉴의 단축키(다시 읽기, 개발자 도구, 끝내기)는 그대로 쓴다.
   win.loadFile(towerPage);
-  guard(win);
-  win.on('resize', () => { fitTower(); fitSettings(); });
-  win.webContents.on('did-finish-load', restartFilesWatch);
-  win.on('closed', () => stopFilesWatch());
-  win.webContents.on('did-finish-load', fitTower);
-  win.on('closed', () => { win = null; });
+  startFlow();
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: '설정', submenu: [
       { label: '계정', click: () => openSettings('accounts') },
@@ -110,7 +120,7 @@ function openSettings(tab = 'accounts', { project } = {}) {
   if (!win || win.isDestroyed()) return null;
   if (!settingsView || settingsView.webContents.isDestroyed()) {
     settingsView = new WebContentsView({ webPreferences: webPreferences() });
-    settingsView.setBackgroundColor('#15181E');
+    settingsView.setBackgroundColor('#0E0D0B');
     guard(settingsView);
     settingsView.webContents.loadFile(join(here, 'renderer', 'index.html'), { query: { tab, ...(project ? { project } : {}) } });
   } else {
@@ -193,16 +203,14 @@ ipcMain.handle('runs:list', () => {
   return { runs, current: runs.includes(cur) ? cur : runs[0] ?? null };
 });
 // 실행 폴더가 아닌 폴더(harness.json 없음): 대상 프로젝트로 설치할지 묻는다. 설치는 설정의 설치 탭에서(값을 채워 넘긴다).
-// 돌려주는 값: 'install'(설치 탭으로 넘김), 'view'(보기만, allowView일 때), null(취소).
-async function askInstallProject(folder, { allowView = false } = {}) {
-  const buttons = allowView ? ['설치하러 가기', '보기만', '취소'] : ['설치하러 가기', '취소'];
+// 돌려주는 값: 'install'(설치 탭으로 넘김), null(취소).
+async function askInstallProject(folder) {
   const c = await dialog.showMessageBox(win, {
-    type: 'question', buttons, defaultId: 0, cancelId: buttons.length - 1,
+    type: 'question', buttons: ['설치하러 가기', '취소'], defaultId: 0, cancelId: 1,
     message: '이 프로젝트를 대상 프로젝트로 설치할까요?',
-    detail: `${folder}\n\n실행 폴더가 아닙니다(harness.json 없음). 설치하면 새 실행 폴더를 만들고 이 프로젝트를 그 안에 복제해 일합니다. 원본 폴더는 건드리지 않습니다.${allowView ? '\n\n보기만: 오른쪽 패널에 이 폴더를 보이기만 합니다(코디네이터는 그대로).' : ''}`,
+    detail: `${folder}\n\n실행 폴더가 아닙니다(harness.json 없음). 설치하면 새 실행 폴더를 만들고 이 프로젝트를 그 안에 복제해 일합니다. 원본 폴더는 건드리지 않습니다.`,
   });
   if (c.response === 0) { openSettings('install', { project: folder }); return 'install'; }
-  if (allowView && c.response === 1) return 'view';
   return null;
 }
 // 실행 폴더를 목록에 더한다(다른 하네스 폴더를 쓰면 묻는다). 고르지 않으면 false.
@@ -216,7 +224,8 @@ async function addRunFolder(run) {
   writePrefs({ extraRuns: [...new Set([...(readPrefs().extraRuns ?? []), run])] });
   return true;
 }
-ipcMain.handle('runs:add', async () => {
+// 폴더 고르기 창 → 실행 폴더면 목록에 더하고 고른다. 일반 프로젝트면 설치할지 묻는다.
+async function pickRunFolder() {
   const r = await dialog.showOpenDialog(win, { title: '실행 폴더 열기(일반 프로젝트를 고르면 설치할지 묻습니다)', properties: ['openDirectory'] });
   if (r.canceled) return { ok: false };
   const run = fwd(r.filePaths[0]);
@@ -227,54 +236,124 @@ ipcMain.handle('runs:add', async () => {
   if (!(await addRunFolder(run))) return { ok: false };
   selectRun(run);
   return { ok: true, run };
-});
-// 실행 폴더를 바꾸면 지금 터미널을 닫고 관제탑에 다시 띄우라고 알린다.
+}
+ipcMain.handle('runs:add', pickRunFolder);
+// 실행 폴더를 바꾸면 지금 터미널을 닫고 관제탑에 다시 띄우라고 알린다. 화면의 세션도 그 폴더의 기록으로 새로 센다.
 function selectRun(run) {
   const changed = readPrefs().currentRun !== run;
   writePrefs({ currentRun: run });
-  if (changed) { stopTerm(); toTower('term:retry', { stopped: true }); writePrefs({ filesRoot: '' }); restartFilesWatch(); }
+  if (changed) { stopTerm(); toTower('term:retry', { stopped: true }); resetFlow(); }
+}
+ipcMain.handle('runs:select', (_e, { run }) => { if (run !== '' && !allowedRun(run)) return { ok: false }; selectRun(run); return { ok: true }; });
+
+// ---- 관제탑 세션 흐름 (app/lib/flow.mjs) ----
+// 지금 실행 폴더의 하네스 기록을 1초마다 읽어 화면 이벤트로 보낸다. 읽기만 한다. 실제로 호출된 세션만 화면에 뜬다.
+const POLL_MS = 1000;
+let flowTimer = null;
+let flowRun = null;
+let blankSeq = 0;
+const flowLog = app.isPackaged ? null : []; // 스모크 시험이 보낸 이벤트 전체를 본다(화면 기록은 6줄만 남는다)
+const quietMs = !app.isPackaged && process.env.TERRARIUM_FLOW_QUIET_MS ? Number(process.env.TERRARIUM_FLOW_QUIET_MS) : undefined;
+function currentRunOrNull() { const r = readPrefs().currentRun; return allowedRun(r) ? r : null; }
+function resetFlow() {
+  flowRun = currentRunOrNull();
+  flow = new FlowTracker({ emit: (ev) => { if (flowLog) flowLog.push(ev); toTower('orchestrator:event', ev); }, quietMs });
+  // 화면을 비운다(앞 실행 폴더의 세션이 남지 않게).
+  toTower('orchestrator:event', { type: 'run.started', runId: `blank-${++blankSeq}`, text: '' });
+  if (flowRun) flow.reset(readFlowSnapshot(flowRun));
+}
+function startFlow() {
+  if (flowTimer) return;
+  resetFlow();
+  flowTimer = setInterval(() => {
+    const run = currentRunOrNull();
+    if (run !== flowRun) { resetFlow(); return; }
+    if (!run) return;
+    try { flow.update(readFlowSnapshot(run)); } catch { /* 기록을 쓰는 중에 읽음: 다음 차례에 다시 읽는다 */ }
+  }, POLL_MS);
+}
+// 코디네이터에 보낸 줄(대략): Enter로 보낼 때 화면 기록에 한 줄 남기고, 도는 세션이 없으면 새 실행을 연다.
+let typed = '';
+function noteInput(data) {
+  for (const ch of String(data).replace(/\x1b\[[0-9;?]*[A-Za-z~]/g, '').replace(/\x1b./g, '')) {
+    if (ch === '\r') { flow?.userLine(typed); typed = ''; }
+    else if (ch === '\x7f' || ch === '\b') typed = typed.slice(0, -1);
+    else if (ch === '\x03' || ch === '\x15' || ch === '\x1b') typed = '';
+    else if (ch >= ' ') typed = (typed + ch).slice(-300);
+  }
 }
 
-// ---- 관제탑 오른쪽 폴더 패널 (읽기 전용) ----
-// 보이는 폴더: 사용자가 고른 폴더, 없으면 지금 실행 폴더. 바뀐 파일은 묶어서 관제탑에 알린다(수정 중 = 주황, 끝나면 초록).
-// 코디네이터에 다음 지시(Enter)가 들어가면 초록 표시를 지운다(files:reset).
-let stopFilesWatch = () => {};
-function filesRoot() {
-  const p = readPrefs();
-  const r = p.filesRoot || p.currentRun || '';
-  return r && existsSync(r) ? fwd(r) : '';
-}
-function restartFilesWatch() {
-  stopFilesWatch();
-  const root = filesRoot();
-  stopFilesWatch = root ? watchFolder(root, (paths) => toTower('files:changes', { root, paths })) : () => {};
-  toTower('files:root', { root, kind: filesKind() });
-}
-const filesKind = () => (readPrefs().filesRoot ? 'view' : 'run');
-ipcMain.handle('files:root', () => ({ root: filesRoot(), kind: filesKind() }));
-// 오른쪽 패널의 [폴더…]: 작업 폴더 고르기.
-// 실행 폴더면 코디네이터를 그 폴더로 옮길지 묻는다. 일반 프로젝트면 대상 프로젝트로 설치할지 묻고, 보기만 하면 패널에만 보인다.
-ipcMain.handle('files:pick', async () => {
-  const r = await dialog.showOpenDialog(win, { title: '작업 폴더 고르기(실행 폴더 또는 프로젝트 폴더)', properties: ['openDirectory'] });
-  if (r.canceled) return { root: filesRoot(), kind: filesKind() };
-  const folder = fwd(r.filePaths[0]);
-  if (existsSync(`${folder}/harness.json`)) {
-    if (folder !== readPrefs().currentRun) {
-      const c = await dialog.showMessageBox(win, { type: 'question', buttons: ['바꾸기', '취소'], defaultId: 0, cancelId: 1, message: '이 실행 폴더로 바꿀까요?', detail: `${folder}\n\n코디네이터 터미널을 닫고 이 실행 폴더에서 다시 띄웁니다.` });
-      if (c.response === 0 && (await addRunFolder(folder))) selectRun(folder);
-    }
-  } else if ((await askInstallProject(folder, { allowView: true })) === 'view') {
-    writePrefs({ filesRoot: folder });
-    restartFilesWatch();
+// ---- 관제탑 상단: 실행 폴더 탭, 사용량, 계정, 코디네이터 정보 (실제로 읽은 값만) ----
+ipcMain.handle('folders:list', () => {
+  const runs = knownRuns();
+  const cur = readPrefs().currentRun;
+  return { folders: runs.map((p) => ({ name: basename(p), path: p })), current: runs.includes(cur) ? cur : null };
+});
+ipcMain.handle('folders:select', (_e, { path } = {}) => { if (!allowedRun(path)) return { ok: false }; selectRun(path); return { ok: true }; });
+ipcMain.handle('folders:pick', async () => {
+  const r = await pickRunFolder();
+  return r.ok ? { ok: true, folder: { name: basename(r.run), path: r.run } } : r;
+});
+const readStatusLine = () => { try { return JSON.parse(readFileSync(statusFile(), 'utf8')); } catch { return null; } };
+const hm = (sec) => { const d = new Date(sec * 1000); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+const md = (sec) => { const d = new Date(sec * 1000); return `${d.getMonth() + 1}/${d.getDate()} ${hm(sec)}`; };
+let claudeVersion = null;
+async function coordinatorVersion() {
+  if (claudeVersion !== null) return claudeVersion;
+  claudeVersion = '';
+  const c = await claudeBin().catch(() => null);
+  if (c && !(!app.isPackaged && process.env.TERRARIUM_FAKE_CLAUDE)) {
+    const r = await exec(c.bin, [...c.args, '--version'], { timeout: 20000 });
+    claudeVersion = (r.stdout.match(/\d+\.\d+\.\d+/) ?? [''])[0];
   }
-  return { root: filesRoot(), kind: filesKind() };
+  return claudeVersion;
+}
+ipcMain.handle('app:info', async () => {
+  const run = currentRunOrNull();
+  const s = readStatusLine();
+  const version = s?.version ?? await coordinatorVersion();
+  return {
+    user: run ? basename(run) : '실행 폴더 없음',
+    sub: version ? `Claude Code v${version}` : 'Claude Code',
+    product: 'Claude Code',
+    version: version ? `v${version}` : '모름',
+    model: s?.model ?? '모름(코디네이터가 한 번 답하면 보입니다)',
+  };
 });
-ipcMain.handle('files:list', (_e, { rel } = {}) => {
-  const root = filesRoot();
-  if (!root) return { ok: false, error: '폴더를 고르세요.' };
-  try { return { ok: true, entries: listDir(root, rel ?? '') }; } catch (e) { return { ok: false, error: e.message }; }
+ipcMain.handle('usage:get', () => {
+  const s = readStatusLine();
+  const meters = [];
+  if (s?.fiveHour) meters.push({ label: '5시간 한도', pct: s.fiveHour.pct, resetText: s.fiveHour.resetsAt ? `resets ${hm(s.fiveHour.resetsAt)}` : '', color: '#f07a73' });
+  if (s?.sevenDay) meters.push({ label: '주간 한도', pct: s.sevenDay.pct, resetText: s.sevenDay.resetsAt ? `resets ${md(s.sevenDay.resetsAt)}` : '', color: '#f4d58d' });
+  if (s && s.context !== null && s.context !== undefined) meters.push({ label: '코디네이터 컨텍스트', pct: s.context, resetText: '/compact로 줄임', color: '#6cb6ff' });
+  const at = s?.at ? new Date(s.at) : null;
+  const note = meters.length
+    ? `코디네이터 statusline에서 읽음 · ${at ? `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}` : ''}`
+    : '아직 없음: 코디네이터가 한 번 답한 뒤에 보입니다(한도 막대는 Claude Pro·Max 구독에서만 옵니다).';
+  return { available: meters.length > 0, meters, note };
 });
-ipcMain.handle('runs:select', (_e, { run }) => { if (run !== '' && !allowedRun(run)) return { ok: false }; selectRun(run); return { ok: true }; });
+let ghLogin = { at: 0, value: null };
+async function githubLogin() {
+  if (Date.now() - ghLogin.at < 300000) return ghLogin.value;
+  ghLogin = { at: Date.now(), value: null };
+  try { ghLogin.value = (await ghExec(['api', 'user', '--jq', '.login'])).trim() || null; } catch { /* 로그인 안 됨 */ }
+  return ghLogin.value;
+}
+ipcMain.handle('account:get', async () => {
+  const run = currentRunOrNull();
+  let repo = '';
+  try { repo = run ? JSON.parse(readFileSync(`${run}/harness.json`, 'utf8')).designatedRepo ?? '' : ''; } catch { /* 없음 */ }
+  const login = await githubLogin();
+  const p = readPrefs();
+  return {
+    name: login ?? 'GitHub 로그인 안 됨',
+    email: login ? 'GitHub 계정(gh)' : '설정 → 계정에서 gh 로그인',
+    repo: repo || '없음',
+    run: run ? basename(run) : '없음',
+    preflight: p.preflightOk === true ? '통과' : '필요(설정 → 계정)',
+    note: '',
+  };
+});
 
 // ---- 코디네이터 터미널 (#39, 결정 8-18) ----
 // 관제탑의 ORCHESTRA 칸이 부른다. 사람이 직접 치는 대화형 claude라 /compact, Esc 끊기, /login이 그대로 된다.
@@ -290,8 +369,12 @@ ipcMain.handle('term:start', async (_e, { fresh = false, cols, rows } = {}) => {
   // 키는 환경 변수로만 넘긴다. 오퍼레이터를 띄울 claude 실행 파일도 알려 준다(.cmd 셔틀은 못 쓴다).
   const env = { ...coordinatorEnv(process.env), ...keys().env(), ...(c.args.length === 0 ? { HARNESS_CLAUDE_BIN: c.bin } : {}) };
   const resume = fresh ? undefined : prefs.sessions?.[run];
+  // 앱이 더하는 설정: statusline 명령 하나(사용량·모델을 관제탑에 보이려고). 실행 폴더의 훅·권한 설정은 그대로다.
+  const settingsFile = `${dataDir()}/coordinator-settings.json`;
+  mkdirSync(dataDir(), { recursive: true });
+  writeFileSync(settingsFile, JSON.stringify({ statusLine: { type: 'command', command: `node "${statuslineScript}" "${statusFile()}"` } }, null, 2));
   const t = new CoordinatorTerminal({
-    run, bin: c.bin, preArgs: c.args, env, resume, cols, rows,
+    run, bin: c.bin, preArgs: c.args, env, resume, cols, rows, settingsFile,
     ptySpawn: (bin, args, o) => pty.spawn(bin, args, o),
     onData: (d) => toTower('term:data', d),
     onExit: ({ code }) => { if (term === t) term = null; toTower('term:exit', { code }); },
@@ -304,8 +387,7 @@ ipcMain.handle('term:start', async (_e, { fresh = false, cols, rows } = {}) => {
 ipcMain.on('term:input', (_e, data) => {
   if (typeof data !== 'string' || data.length > 100000) return;
   term?.write(data);
-  // 코디네이터에 다음 지시를 보냈다(Enter): 폴더 패널의 "수정 완료"(초록) 표시를 지운다.
-  if (term && data.includes('\r')) toTower('files:reset', {});
+  if (term) noteInput(data);
 });
 ipcMain.on('term:resize', (_e, { cols, rows } = {}) => term?.resize(cols, rows));
 ipcMain.handle('settings:open', (_e, { tab } = {}) => { openSettings(['accounts', 'install', 'progress'].includes(tab) ? tab : 'accounts'); return { ok: true }; });
@@ -320,28 +402,12 @@ ipcMain.handle('settings:save', (_e, { designatedRepo } = {}) => {
   return { ok: true };
 });
 
-// ---- 진행 표시 (#40) ----
-// 관제탑 카드·팀·통합·사무실(결정 8-19): 지금 실행 폴더의 상태를 읽어 관제탑 모양으로 넘긴다. 읽기만 한다.
-// 관제탑은 4초마다 묻는다. 하달 파일은 매번 읽고, GitHub 이슈(gh)는 30초에 한 번만 읽는다.
-const towerCache = { run: null, at: 0, issues: null, err: null };
-// 30초 안에는 앞서 읽은 것을 준다. 읽기에 실패하면 앞서 읽은 것이 있으면 그것을, 없으면 그 실패를 30초 동안 준다.
-const cachedGh = async (args) => {
-  if (Date.now() - towerCache.at < 30000) { if (towerCache.issues !== null) return towerCache.issues; if (towerCache.err) throw towerCache.err; }
-  towerCache.at = Date.now();
-  try { towerCache.issues = await ghExec(args); towerCache.err = null; } catch (e) { towerCache.err = e; if (towerCache.issues === null) throw e; }
-  return towerCache.issues;
-};
-ipcMain.handle('tower:status', async () => {
-  const run = readPrefs().currentRun;
-  if (!allowedRun(run)) return towerView(null);
-  if (towerCache.run !== run) Object.assign(towerCache, { run, at: 0, issues: null, err: null });
-  try { return towerView(await readStatus(run, cachedGh)); } catch (e) { return towerView(null, e.message); }
-});
+// ---- 진행 표시 (#40): 설정 화면의 진행 기록 탭 ----
 ipcMain.handle('status', async (_e, { run }) => { if (!allowedRun(run)) return { ok: false, error: '실행 폴더를 고르세요.' }; try { return { ok: true, status: await readStatus(run, ghExec) }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('open:url', (_e, { url }) => { if (/^https:\/\/github\.com\//.test(url)) shell.openExternal(url); });
 
-// 시험용: TERRARIUM_USER_DATA로 앱 데이터 폴더를 바꾸고, TERRARIUM_SMOKE=<폴더>이면 창을 보이지 않고 관제탑과 설정 탭을 찍은 뒤 끝낸다.
-// 설치본에서는 시험용 환경 변수를 무시한다.
+// 시험용: TERRARIUM_USER_DATA로 앱 데이터 폴더를 바꾸고, TERRARIUM_SMOKE=<폴더>이면 관제탑을 입력 이벤트로 움직여 검사한 뒤 끝낸다.
+// 보통은 app/test/smoke.mjs가 임시 폴더와 가짜 코디네이터(TERRARIUM_FAKE_CLAUDE)를 준비해 부른다. 설치본에서는 시험용 환경 변수를 무시한다.
 const testing = !app.isPackaged;
 if (testing && process.env.TERRARIUM_USER_DATA) app.setPath('userData', process.env.TERRARIUM_USER_DATA);
 // 앱은 하나만 뜬다: 둘이면 같은 실행 폴더에 코디네이터가 둘이 된다.
@@ -349,110 +415,172 @@ if (!(testing && process.env.TERRARIUM_SMOKE) && !app.requestSingleInstanceLock(
 app.on('second-instance', () => { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.focus(); } });
 async function smoke(dir) {
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  const shot = async (w, name) => writeFileSync(`${dir}/${name}.png`, (await w.webContents.capturePage()).toPNG());
   mkdirSync(dir, { recursive: true });
-  // 관제탑: 터미널이 뜨고(조건이 맞으면) 첫 화면이 그려질 때까지 기다린 뒤 찍는다.
-  win = new BrowserWindow({ width: 1320, height: 900, show: false, webPreferences: webPreferences() });
-  await win.loadFile(towerPage);
-  restartFilesWatch();
-  fitTower();
-  await wait(Number(process.env.TERRARIUM_SMOKE_WAIT ?? 8) * 1000);
-  await shot(win, 'tower');
-  // 터미널 렌더러: WebGL이면 #term 안에 canvas가 있다(로고 블록 문자를 화소로 그린다).
-  writeFileSync(`${dir}/terminal-renderer.json`, JSON.stringify({ webgl: await win.webContents.executeJavaScript("Boolean(document.querySelector('#term canvas'))") }));
-  // 오른쪽 폴더 패널: 창을 넓혀 패널을 보이고, 고른 폴더(prefs.filesRoot)의 파일을 바꿔 주황 → 초록 → 다음 지시로 지워지는지 본다.
-  if (readPrefs().filesRoot) {
-    const q = (code) => win.webContents.executeJavaScript(code);
-    win.setContentSize(1800, 900);
-    fitTower();
-    await wait(1200);
-    const files = { visible: await q("getComputedStyle(document.getElementById('files')).display !== 'none'"), rows: await q("document.querySelectorAll('#files .f-row').length") };
-    writeFileSync(`${readPrefs().filesRoot}/smoke-edit.txt`, String(Date.now()));
+  const results = [];
+  const check = (name, ok, detail) => {
+    results.push({ name, ok: Boolean(ok), detail });
+    console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail !== undefined ? `  ${JSON.stringify(detail)}` : ''}`);
+  };
+  const errors = [];
+  try {
+    win = towerWindow({ show: false });
+    const wc = win.webContents;
+    wc.on('console-message', (e) => { if (e.level === 'error' || e.level === 3) errors.push(String(e.message).slice(0, 160)); });
+    wc.on('render-process-gone', (_e, d) => errors.push(`renderer gone: ${d.reason}`));
+    startFlow();
+    await win.loadFile(towerPage);
+    win.showInactive();
+    const js = (code) => wc.executeJavaScript(code, true);
+    const debug = () => js('window.__terrariumDebug ? window.__terrariumDebug() : null');
+    const shot = async (name) => writeFileSync(`${dir}/${name}.png`, (await wc.capturePage()).toPNG());
+    const rectOf = (sel) => js(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height }; })()`);
+    const mouse = (type, x, y, button = 'left', extra = {}) => wc.sendInputEvent({ type, x: Math.round(x), y: Math.round(y), button, clickCount: type === 'mouseMove' ? 0 : 1, ...extra });
+    const click = async (x, y) => { mouse('mouseDown', x, y); await wait(30); mouse('mouseUp', x, y); await wait(80); };
+    const until = async (fn, ms) => { const end = Date.now() + ms; let v; while (Date.now() < end) { v = await fn(); if (v) return v; await wait(200); } return v; };
+    const typeInTerminal = async (text) => {
+      await js("document.querySelector('#term .xterm-helper-textarea').focus()");
+      for (const ch of text) { wc.sendInputEvent({ type: 'char', keyCode: ch }); await wait(15); }
+      wc.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+      wc.sendInputEvent({ type: 'char', keyCode: '\r' });
+      wc.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
+    };
+
+    // ---- 첫 화면: 실제 코디네이터 터미널, 세션 없음, 가짜 데이터·장식 없음 ----
+    let d = await until(async () => { const x = await debug(); return x && x.term === 'running' ? x : null; }, 15000);
+    check('코디네이터 터미널이 코디네이터 창 안에서 뜬다', d && d.term === 'running', d && d.term);
+    d = await debug();
+    check('처음에는 하위 세션이 없다', d && d.sessions.length === 0, d && d.sessions.length);
+    const text = await js('document.body.innerText');
+    check('가짜 데이터와 거짓 장식이 없다(YOLO, bypass, 예시 계정·폴더)', !/YOLO|bypass permissions|Kai|Votelanding|예시 데이터/.test(text));
+    const inline = await js('[...document.querySelectorAll("#root *")].filter((el) => [...el.attributes].some((a) => a.name.startsWith("on"))).length');
+    check('인라인 이벤트 속성이 없다(CSP)', inline === 0, inline);
+    const termScale = () => js("(() => { const s = document.querySelector('#term .xterm-screen'); if (!s) return null; return +(s.getBoundingClientRect().width / s.offsetWidth).toFixed(3); })()");
+    check('터미널은 화면 배율과 상관없이 1배로 그린다(배율 1)', Math.abs((await termScale()) - 1) < 0.01, await termScale());
+    await shot('01-start');
+
+    // ---- 배경·창 다루기 ----
+    const size = await js('({ w: innerWidth, h: innerHeight })');
+    const bg = { x: 60, y: size.h - 120 };
+    await click(bg.x, bg.y);
+    d = await debug();
+    check('배경 클릭은 화면을 움직이지 않는다', d.cam.x === 0 && d.cam.y === 0 && !d.panning, d.cam);
+    mouse('mouseDown', bg.x, bg.y);
+    for (let i = 1; i <= 6; i++) { mouse('mouseMove', bg.x + i * 30, bg.y - i * 10, 'left', { modifiers: ['leftButtonDown'] }); await wait(16); }
+    mouse('mouseUp', bg.x + 180, bg.y - 60);
+    await wait(150);
+    d = await debug();
+    check('배경 끌기로 화면이 움직인다', d.cam.x === 180 && d.cam.y === -60, d.cam);
+    await js('document.querySelector("canvas").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))');
+    await wait(100);
+    const bar = await rectOf('[aria-label="Claude Code terminal session"] > div');
+    const before = (await debug()).win;
+    mouse('mouseDown', bar.x - 120, bar.y);
+    for (let i = 1; i <= 5; i++) { mouse('mouseMove', bar.x - 120 + i * 10, bar.y + i * 6, 'left', { modifiers: ['leftButtonDown'] }); await wait(16); }
+    mouse('mouseUp', bar.x - 70, bar.y + 30);
+    await wait(150);
+    d = await debug();
+    check('코디네이터 창을 머리줄로 끌어 옮긴다', d.win.dx - before.dx > 30 && !d.dragging, d.win);
+    const home = await rectOf('nav button[title^="화면 위치"]');
+    await click(home.x, home.y);
+    d = await debug();
+    check('[처음 화면]이 창 위치를 되돌린다', d.win.dx === 0 && d.win.dy === 0, d.win);
+    // 휠로 축소해도 터미널은 1배(글자 선명, 마우스 선택 위치 맞음)
+    const canvasPt = { x: 40, y: 200 };
+    wc.sendInputEvent({ type: 'mouseWheel', x: canvasPt.x, y: canvasPt.y, deltaX: 0, deltaY: -240, canScroll: true });
+    await wait(400);
+    d = await debug();
+    const zoomed = await termScale();
+    check('축소한 화면에서도 터미널은 1배로 그린다', d.cam.z < 0.95 && Math.abs(zoomed - 1) < 0.01, { z: d.cam.z, scale: zoomed });
+    await js('document.querySelector("canvas").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))');
+    await wait(300);
+
+    // ---- 위쪽 칸: 실행 폴더, 설정 요약, 계정 ----
+    const folderBtn = await rectOf('nav button[aria-haspopup="dialog"]');
+    await click(folderBtn.x, folderBtn.y);
+    await wait(150);
+    const folders = await js(`[...document.querySelectorAll('[role="dialog"][aria-label="실행 폴더"] button')].map((b) => b.textContent)`);
+    check('실행 폴더 목록에 실제 실행 폴더가 있다', folders.some((t) => t.includes('smoke-run')), folders);
+    await click(folderBtn.x, folderBtn.y);
+    const gear = await rectOf('button[aria-label="Settings"]');
+    await click(gear.x, gear.y);
+    await wait(200);
+    const sum = await js(`(document.querySelector('[role="dialog"][aria-label="설정"]') || {}).innerText || ''`);
+    check('설정 요약에 실제 값(지정 저장소, 사전 점검, 사용량 출처)이 보인다', /owner\/smoke-issues/.test(sum) && /통과/.test(sum) && /코디네이터가 한 번 답한 뒤|statusline/.test(sum), sum.slice(0, 200));
+    await shot('02-settings-popup');
+    await js(`[...document.querySelectorAll('[role="dialog"][aria-label="설정"] button')].find((b) => b.textContent.includes('설정 열기')).click()`);
     await wait(900);
-    files.editing = await q("[...document.querySelectorAll('#files .f-row.editing')].map((r) => r.title)");
-    await shot(win, 'files-editing');
-    await wait(3200);
-    files.done = await q("[...document.querySelectorAll('#files .f-row.done')].map((r) => r.title)");
-    await shot(win, 'files-done');
-    toTower('files:reset', {});
+    check('[설정 열기]가 본창 안에 설정 화면(계정·설치·진행)을 띄운다', win.contentView.children.includes(settingsView));
+    closeSettings();
+    await wait(200);
+    const prof = await rectOf('button[aria-label="Profile"]');
+    await click(prof.x, prof.y);
+    await wait(200);
+    const acct = await js(`(document.querySelector('[role="dialog"][aria-label="계정 정보"]') || {}).innerText || ''`);
+    check('계정 칸에 실행 폴더와 지정 저장소가 보인다', /smoke-run/.test(acct) && /owner\/smoke-issues/.test(acct), acct.slice(0, 200));
+    await click(prof.x, prof.y);
+
+    // ---- 하달: 코디네이터 터미널에 지시 → 필요한 만큼만 세션이 뜬다 ----
+    await typeInTerminal('정렬 기능 하달해줘');
+    d = await until(async () => { const x = await debug(); return x && x.sessions.some((s) => s.role === 'wk' && s.st === 'WORKING') ? x : null; }, 12000);
+    check('하달하면 워커가 일하는 중으로 뜬다', Boolean(d), d && d.sessions.map((s) => `${s.id}:${s.st}`));
     await wait(300);
-    files.afterNextInstruction = await q("document.querySelectorAll('#files .f-row.done, #files .f-row.editing').length");
-    // 폭 바꾸기·접기: 손잡이를 ←로 다섯 번(80px 넓힘) → 코디네이터 칸이 좁아지고, 접으면 넓어지는지.
-    const chatW = () => q("Math.round(document.querySelector('.chat').getBoundingClientRect().width)");
-    files.layout = { app: await q("document.body.classList.contains('app')"), chat: await chatW(), panel: await q("Math.round(document.getElementById('files').getBoundingClientRect().width)") };
-    await q("(() => { const r = document.getElementById('files-resizer'); for (let i = 0; i < 5; i++) r.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); })()");
+    await shot('03-running');
+    d = await until(async () => { const x = await debug(); return x && x.coordSt === 'DONE' ? x : null; }, 20000);
+    d = d ?? await debug();
+    const ids = d.sessions.map((s) => s.id).sort();
+    const want = ['adv-1', 'op-h1', 'op-h2', 'wk-h1-11', 'wk-h1-12'];
+    check('딱 필요한 세션만 뜬다: 어드바이저 1, 하달한 팀의 오퍼레이터 2(개발·테스터), 하달 이슈의 워커 2', JSON.stringify(ids) === JSON.stringify(want), ids);
+    const by = Object.fromEntries(d.sessions.map((s) => [s.id, s]));
+    check('워커는 자기 하달의 오퍼레이터 아래에 붙는다', by['wk-h1-11']?.parent === 'op-h1' && by['wk-h1-12']?.parent === 'op-h1', d.sessions.map((s) => `${s.id}<${s.parent}`));
+    check('하달하지 않은 팀(디자인·기획·보안)의 오퍼레이터는 없다', !d.sessions.some((s) => /디자인|기획|보안/.test(s.label)), d.sessions.map((s) => s.label));
+    check('워커 모델은 하네스가 정한 값이다(claude, gemini)', by['wk-h1-11']?.model === 'claude' && by['wk-h1-12']?.model === 'gemini');
+    check('모든 세션이 끝나고 코디네이터가 DONE', d.sessions.every((s) => s.st === 'DONE') && d.coordSt === 'DONE', { coord: d.coordSt, st: d.sessions.map((s) => `${s.id}:${s.st}`) });
+    const live = await js(`(document.querySelector('[role="toolbar"][aria-label="Status"]').textContent.match(/(\\d+) live/) || [])[1]`);
+    check('live 수가 0으로 돌아온다', live === '0', live);
+    const flowText = flowLog.filter((e) => e.type === 'coordinator.log').map((e) => e.text);
+    const order = [/Advisor 호출/, /Jev 조언 판정: 허용/, /개발 Operator · h1 하달/, /Worker #11 호출/, /테스터 Operator · h2 하달/, /Jev 리뷰어 판정 · 이슈 #11/, /모든 하위 세션 완료/].map((re) => flowText.findIndex((t) => re.test(t)));
+    check('화면 기록에 흐름이 순서대로 남는다(어드바이저 → Jev 조언 판정 → 하달 → 워커 → 둘째 하달 → 리뷰어 → 완료)', order.every((i, k) => i >= 0 && (k === 0 || i > order[k - 1])), { order, flowText });
+    await shot('04-done');
+    // 오퍼레이터 두 번 누르기 → 그 하달의 워커 목록(읽기 전용)
+    const op1 = await rectOf('[aria-label="개발 Operator · h1"] > div');
+    if (op1) {
+      await click(op1.x, op1.y); await click(op1.x, op1.y);
+      await wait(300);
+      const rows = await js(`document.querySelectorAll('[role="dialog"][aria-label$="workers"] [title="모델은 하네스 라우팅(Jev)이 정합니다"]').length`);
+      check('오퍼레이터를 두 번 누르면 그 하달의 워커 2명이 보인다(모델은 읽기 전용)', rows === 2, rows);
+      await shot('05-operator-panel');
+    } else check('오퍼레이터를 두 번 누르면 그 하달의 워커 2명이 보인다(모델은 읽기 전용)', false, '오퍼레이터 창 없음');
+
+    // ---- 하위 세션 없는 차례: 새 실행, 세션 0, 대기로 돌아감 ----
+    await typeInTerminal('지금 상태 알려줘');
+    await wait(1500);
+    d = await debug();
+    check('하위 세션 없이 답한 차례에는 세션이 뜨지 않는다', d.sessions.length === 0, d.sessions.map((s) => s.id));
+    d = await until(async () => { const x = await debug(); return x && x.coordSt === 'READY' ? x : null; }, 10000);
+    check('코디네이터가 잠잠해지면 READY로 돌아간다', d && d.coordSt === 'READY', d && d.coordSt);
+    await shot('06-answer-only');
+
+    // ---- 설정 화면: 저장 확인 흐름(예전 시험 그대로) ----
+    const attached = () => win.contentView.children.includes(settingsView);
+    const v = openSettings('accounts');
+    await wait(900);
+    const sjs = (code) => v.webContents.executeJavaScript(code);
+    await sjs("document.getElementById('pf-repo').value = 'owner/smoke-issues'; document.getElementById('pf-repo').dispatchEvent(new Event('input'))");
+    await sjs("document.getElementById('save').click()");
     await wait(300);
-    files.layout.afterWiden = { chat: await chatW(), panel: await q("Math.round(document.getElementById('files').getBoundingClientRect().width)") };
-    await shot(win, 'files-widened');
-    await q("document.querySelector('.panel-toggle').click()");
-    await wait(300);
-    files.layout.closed = { chat: await chatW(), panelShown: await q("getComputedStyle(document.getElementById('files')).display !== 'none'") };
-    await shot(win, 'files-closed');
-    await q("document.querySelector('.panel-toggle').click()");
-    await q("document.getElementById('files-resizer').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))");
-    await wait(300);
-    files.layout.reopened = { chat: await chatW(), panelShown: await q("getComputedStyle(document.getElementById('files')).display !== 'none'") };
-    writeFileSync(`${dir}/files-panel.json`, JSON.stringify(files, null, 2));
-    win.setContentSize(1320, 900);
-    fitTower();
+    const confirm = await sjs("({ open: document.getElementById('confirm').open, msg: document.getElementById('confirm-msg').textContent })");
+    await sjs("document.getElementById('confirm-yes').click()");
+    await wait(800);
+    check('설정 [저장] → "저장하시겠습니까?" → 저장하기 → 관제탑으로 돌아온다', confirm.open && !attached() && readPrefs().designatedRepo === 'owner/smoke-issues', confirm);
+    check('콘솔 오류가 없다', errors.length === 0, errors.slice(0, 5));
+  } catch (e) {
+    check('스모크가 끝까지 돌았다', false, String(e?.stack ?? e).slice(0, 600));
   }
-  // 관제탑의 팀 상세·통합·사무실도 눌러서 찍는다(실제 상태가 들어갔는지 보려고).
-  for (const [name, sel] of [['tower-team', '.item[data-team="sec"]'], ['tower-total', '.item-total'], ['tower-office', '.tab[data-mode="office"]'], ['tower-back', '.tab[data-mode="matrix"]']]) {
-    await win.webContents.executeJavaScript(`document.querySelector('${sel}').click()`);
-    await wait(2500);
-    await shot(win, name);
-  }
-  // TERRARIUM_SMOKE_STEPS='[["글자", 기다릴 초], ...]': 실제 코디네이터 터미널에 차례로 쳐 넣고, 단계마다 찍는다.
-  const steps = process.env.TERRARIUM_SMOKE_STEPS ? JSON.parse(process.env.TERRARIUM_SMOKE_STEPS) : [];
-  for (const [i, [keys, secs]] of steps.entries()) {
-    if (!term?.pty) break;
-    term.write(keys);
-    await wait(Number(secs) * 1000);
-    await shot(win, `tower-step${i + 1}`);
-  }
-  // 본창 안 설정 화면: 열기 → [저장] → "저장하기" → 관제탑으로 돌아오는지 누름으로 확인해 settings-flow.json에 남긴다.
-  const attached = () => win.contentView.children.includes(settingsView);
-  const flow = {};
-  const v = openSettings('accounts');
-  await new Promise((r) => v.webContents.once('did-finish-load', r));
-  await wait(800);
-  flow.openedInWindow = attached();
-  const js = (code) => v.webContents.executeJavaScript(code);
-  await js("document.getElementById('pf-repo').value = 'owner/smoke-issues'; document.getElementById('pf-repo').dispatchEvent(new Event('input'))");
-  flow.dirtyShown = await js("!document.getElementById('dirty').hidden");
-  await js("document.getElementById('save').click()");
-  await wait(300);
-  flow.confirm = await js("({ open: document.getElementById('confirm').open, msg: document.getElementById('confirm-msg').textContent, yes: document.getElementById('confirm-yes').textContent, detail: document.getElementById('confirm-detail').textContent })");
-  await js("document.getElementById('confirm-yes').click()");
-  await wait(800);
-  flow.closedAfterSave = !attached();
-  flow.savedRepo = readPrefs().designatedRepo ?? null;
-  openSettings('install');
-  await wait(500);
-  flow.reopenedTab = await js("document.querySelector('[data-tab][aria-selected=\"true\"]').dataset.tab");
-  flow.repoPrefilled = await js("document.getElementById('pf-repo').value");
-  await js("document.getElementById('back').click()");
-  await wait(300);
-  flow.closedOnBackWithoutChanges = !attached();
-  // 일반 프로젝트를 골라 "설치하러 가기"를 누른 뒤의 화면: 설치 탭에 대상 프로젝트와 실행 폴더 이름이 채워진다.
-  openSettings('install', { project: 'C:/work/My Project' });
-  await wait(800);
-  flow.installPrefill = await js("({ tab: document.querySelector('[data-tab][aria-selected=\"true\"]').dataset.tab, project: document.getElementById('in-project').value, name: document.getElementById('in-name').value })");
-  closeSettings();
-  writeFileSync(`${dir}/settings-flow.json`, JSON.stringify(flow, null, 2));
-  // 화면 그림은 같은 설정 페이지를 숨긴 창에 따로 띄워 찍는다(본창 안 보기는 숨긴 창에서 찍히지 않는다).
-  const sw = new BrowserWindow({ width: 1320, height: 900, show: false, webPreferences: webPreferences() });
-  await sw.loadFile(join(here, 'renderer', 'index.html'), { query: { tab: 'accounts' } });
-  for (const tab of ['accounts', 'install', 'progress']) {
-    sw.webContents.send('settings:tab', tab);
-    await wait(tab === 'progress' ? 4000 : 800);
-    await shot(sw, tab);
-  }
-  await sw.webContents.executeJavaScript("document.getElementById('save').click()");
-  await wait(400);
-  await shot(sw, 'confirm');
+  writeFileSync(`${dir}/results.json`, JSON.stringify(results, null, 2));
+  const failed = results.filter((x) => !x.ok).length;
+  console.log(failed ? `SMOKE FAILED: ${failed} of ${results.length}` : `SMOKE OK: ${results.length} checks`);
   stopTerm();
-  app.quit();
+  app.exit(failed ? 1 : 0);
 }
 app.whenReady().then(() => (testing && process.env.TERRARIUM_SMOKE ? smoke(process.env.TERRARIUM_SMOKE) : createWindow()));
-app.on('window-all-closed', () => { stopTerm(); app.quit(); });
+app.on('window-all-closed', () => { stopTerm(); clearInterval(flowTimer); app.quit(); });

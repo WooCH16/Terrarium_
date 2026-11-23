@@ -1,9 +1,9 @@
-/* 관제탑(css/style.css)과 같은 어두운 바탕·초록 강조. 오래 읽는 창이라 눈부심을 줄인다:
-   글자는 순백 대신 부드러운 회백, 형광 초록은 강조선에만, 본문은 15px·줄 간격 1.6, 대비는 본문 약 13:1, 보조 글자 약 7:1. */
+/* 관제탑(app/tower)과 같은 따뜻한 어두운 바탕·주황 강조. 오래 읽는 창이라 눈부심을 줄인다:
+   글자는 순백 대신 부드러운 회백, 강조색은 강조선에만, 본문은 15px·줄 간격 1.6. */
 :root {
-  --bg: #15181E; --panel: #1C2028; --panel-2: #252A34; --ink: #E2E5EA; --muted: #A4ABB5; --line: #2F3541;
-  --accent: #4FB36A; --accent-strong: #00FF41; --accent-bg: #0F2A18; --accent-ink: #06140A;
-  --ok: #6FD08C; --bad: #FF8F86; --warn: #E9C46A; --info: #8DB8FF;
+  --bg: #0E0D0B; --panel: #181715; --panel-2: #1D1C1A; --ink: #E8E6E1; --muted: #A8A59C; --line: #2E2D2A;
+  --accent: #D97757; --accent-strong: #F0835F; --accent-bg: #2A1A14; --accent-ink: #181715;
+  --ok: #5FD0B5; --bad: #F07A73; --warn: #F4D58D; --info: #6CB6FF;
   font-family: "Segoe UI", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif; font-size: 15px; line-height: 1.6; color: var(--ink);
   color-scheme: dark;
 }
@@ -12,7 +12,7 @@ body { margin: 0; background: var(--bg); }
 ::selection { background: var(--accent-bg); color: var(--ink); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 a { color: var(--info); }
-.top { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--accent-bg); background: #000000; }
+.top { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .brand { font-family: Consolas, "JetBrains Mono", monospace; font-weight: 700; font-size: 15px; letter-spacing: .14em; color: var(--accent); }
 .brand .sub { font-family: "Segoe UI", "Malgun Gothic", sans-serif; font-weight: 400; font-size: 13px; letter-spacing: 0; color: var(--muted); margin-left: 8px; }
 .run-pick { color: var(--muted); display: flex; gap: 8px; align-items: center; }
@@ -29,7 +29,7 @@ h3 { font-size: 13px; font-weight: 600; letter-spacing: .08em; color: var(--mute
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .col { display: flex; flex-direction: column; gap: 6px; }
 input, select, textarea { font: inherit; color: var(--ink); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
-input::placeholder, textarea::placeholder { color: #7C848F; }
+input::placeholder, textarea::placeholder { color: #8A877F; }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); outline: none; }
 input { min-width: 280px; }
 textarea { width: 100%; resize: vertical; }
@@ -40,7 +40,7 @@ button.primary { background: var(--accent); color: var(--accent-ink); border-col
 button.primary:hover { filter: brightness(1.1); }
 button.small { padding: 3px 8px; font-size: 12px; font-weight: 400; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 10px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-pre.card { font-family: Consolas, "D2Coding", monospace; font-size: 13.5px; line-height: 1.55; max-height: 340px; overflow: auto; background: #0D0F11; }
+pre.card { font-family: Consolas, "D2Coding", monospace; font-size: 13.5px; line-height: 1.55; max-height: 340px; overflow: auto; background: #0B0A09; }
 .muted { color: var(--muted); }
 .ok { color: var(--ok); }
 .bad { color: var(--bad); }

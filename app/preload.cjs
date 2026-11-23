@@ -21,20 +21,26 @@ contextBridge.exposeInMainWorld('terrarium', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (s) => ipcRenderer.invoke('settings:save', s),
   closeSettings: () => ipcRenderer.invoke('settings:close'),
-  // 관제탑 오른쪽 폴더 패널(읽기 전용): 폴더 고르기, 목록, 바뀐 파일·다음 지시 알림
-  files: {
-    root: () => ipcRenderer.invoke('files:root'),
-    pick: () => ipcRenderer.invoke('files:pick'),
-    list: (rel) => ipcRenderer.invoke('files:list', { rel }),
-    onRoot: (fn) => listen('files:root', fn),
-    onChanges: (fn) => listen('files:changes', fn),
-    onReset: (fn) => listen('files:reset', fn),
+  // 관제탑(app/tower): 하네스 기록에서 나온 세션 이벤트(읽기 전용). 이벤트 모양은 docs/app-screen.md
+  orchestrator: {
+    onEvent: (fn) => {
+      const l = (_e, ev) => fn(ev);
+      ipcRenderer.on('orchestrator:event', l);
+      return () => ipcRenderer.removeListener('orchestrator:event', l);
+    },
   },
-  // 관제탑 카드·팀·통합·사무실의 실제 상태(읽기 전용)
-  towerStatus: () => ipcRenderer.invoke('tower:status'),
-  // 코디네이터 터미널(관제탑의 ORCHESTRA 칸)
+  // 관제탑 위쪽 칸: 코디네이터 정보, 사용량, 계정, 실행 폴더(실제로 읽은 값만)
+  app: { info: () => ipcRenderer.invoke('app:info') },
+  usage: { get: () => ipcRenderer.invoke('usage:get') },
+  account: { get: () => ipcRenderer.invoke('account:get') },
+  folders: {
+    list: () => ipcRenderer.invoke('folders:list'),
+    select: (path) => ipcRenderer.invoke('folders:select', { path }),
+    pick: () => ipcRenderer.invoke('folders:pick'),
+  },
+  // 코디네이터 터미널(관제탑의 코디네이터 창)
   terminal: {
-    // xterm 파일의 위치(앱 의존성). 관제탑 페이지는 저장소 루트에 있어 상대 경로로는 닿지 않는다.
+    // xterm 파일의 위치(앱 의존성, 설치본은 app.asar 안)
     base: ipcRenderer.sendSync('term:base'),
     start: (opts) => ipcRenderer.invoke('term:start', opts),
     input: (data) => ipcRenderer.send('term:input', data),
