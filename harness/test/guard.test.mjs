@@ -54,6 +54,16 @@ test('exit 2 with reason for denied write', () => {
   assert.match(r.stderr, /지정 저장소 클론 밖에는 쓰지 않는다/);
 });
 
+test('#5: 입력을 읽다가 난 가드 오류도 막고 guard.log에 한 줄 남긴다', () => {
+  const { configPath, run } = setup();
+  const r = invoke(['--config', configPath, '--visibility-stub', 'PRIVATE'], '{not json');
+  assert.equal(r.status, 2);
+  const line = JSON.parse(readFileSync(join(run, 'guard.log'), 'utf8').trim().split('\n').pop());
+  assert.equal(line.allow, false);
+  assert.equal(line.tool_name, null);
+  assert.match(line.reason, /^가드 오류로 막음: /);
+});
+
 test('writes guard.log line', () => {
   const { configPath, run } = setup();
   invoke(['--config', configPath, '--visibility-stub', 'PRIVATE'],

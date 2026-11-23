@@ -102,8 +102,12 @@ function writeLog(file, input, result) {
   }
 }
 
+// 설정 파일을 읽은 뒤의 가드 오류(입력 JSON이 깨짐 등)도 막고 실행 폴더의 guard.log에 한 줄 남긴다(이슈 #5).
+// 설정 파일조차 못 읽으면 남길 곳을 모르므로 막기만 한다.
+let errorLog = null;
 try {
   const fileConfig = JSON.parse(readFileSync(arg('--config'), 'utf8'));
+  if (typeof fileConfig?.runDir === 'string' && fileConfig.runDir) errorLog = join(fileConfig.runDir, 'guard.log');
   const input = JSON.parse(readFileSync(0, 'utf8'));
   const { role: _r, handoff: _h, issue: _i, worktree: _w, baseHandoff: _b, ...base } = fileConfig;
   const ov = roleOverrides();
@@ -125,5 +129,7 @@ try {
   if (!result.allow) fail(result.reason);
   process.exit(0);
 } catch (e) {
-  fail(`가드 오류로 막음: ${e.message}`);
+  const reason = `가드 오류로 막음: ${e.message}`;
+  if (errorLog) writeLog(errorLog, { tool_name: null }, { allow: false, reason });
+  fail(reason);
 }
