@@ -12,10 +12,12 @@ const harnessDir = join(dirname(fileURLToPath(import.meta.url)), '..').replace(/
 const fwd = (p) => p.replace(/\\/g, '/');
 
 test('#22: 전역 CLAUDE.md·rules와 상위 폴더마다의 CLAUDE.md를 빼고, 그 폴더 자신의 것은 남긴다', () => {
-  const ex = claudeMdExcludes('C:/a/b/run', 'C:/Users/u');
-  assert.deepEqual(ex.slice(0, 2), ['C:/Users/u/.claude/CLAUDE.md', 'C:/Users/u/.claude/rules/**']);
-  for (const p of ['C:/a/b/CLAUDE.md', 'C:/a/b/CLAUDE.local.md', 'C:/a/CLAUDE.md', 'C:/CLAUDE.md']) assert.ok(ex.includes(p), p);
-  assert.ok(!ex.some((p) => p.startsWith('C:/a/b/run/')), '세션 폴더 자신의 CLAUDE.md는 남는다');
+  // 경로 모양은 플랫폼을 따른다(Linux CI에서 C:/a/b/run은 상대 경로로 풀린다)
+  const R = process.platform === 'win32' ? 'C:' : '';
+  const ex = claudeMdExcludes(`${R}/a/b/run`, `${R}/Users/u`);
+  assert.deepEqual(ex.slice(0, 2), [`${R}/Users/u/.claude/CLAUDE.md`, `${R}/Users/u/.claude/rules/**`]);
+  for (const p of [`${R}/a/b/CLAUDE.md`, `${R}/a/b/CLAUDE.local.md`, `${R}/a/CLAUDE.md`, `${R}/CLAUDE.md`]) assert.ok(ex.includes(p), p);
+  assert.ok(!ex.some((p) => p.startsWith(`${R}/a/b/run/`)), '세션 폴더 자신의 CLAUDE.md는 남는다');
   assert.ok(!ex.some((p) => p.includes('//')), ex.join(' '));
 });
 
