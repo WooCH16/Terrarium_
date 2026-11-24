@@ -91,8 +91,27 @@ function towerWindow({ show = true } = {}) {
   // 화면을 (다시) 읽으면 지금 실행의 세션을 다시 보낸다.
   w.webContents.on('did-finish-load', () => flow?.replay());
   w.on('closed', () => { if (win === w) win = null; });
+  // 창을 닫을 때 진행 중인 세션이 있으면 묻는다: [확인] 닫기, [돌아가기] 그대로.
+  let closeOk = false;
+  w.on('close', (e) => {
+    if (closeOk) return;
+    const n = flow?.busyCount() ?? 0;
+    if (!n) return;
+    e.preventDefault();
+    askClose(w, {
+      type: 'warning', buttons: ['확인', '돌아가기'], defaultId: 1, cancelId: 1, noLink: true, title: 'Terrarium',
+      message: '진행중인 세션이 있습니다.',
+      detail: `돌고 있는 세션 ${n}개(코디네이터·어드바이저·오퍼레이터·워커).\n\n확인을 누르면 앱과 코디네이터 터미널이 닫힙니다. 코디네이터의 지금 차례(판정·반영·보고)는 끊깁니다. 이미 하달된 오퍼레이터·워커는 따로 돌며 끝까지 갑니다.`,
+    }).then((r) => {
+      if (r.response !== 0 || w.isDestroyed()) return;
+      closeOk = true;
+      w.close();
+    });
+  });
   return w;
 }
+// 창 닫기 확인 대화상자(스모크 시험이 바꿔 끼운다).
+let askClose = (w, opts) => dialog.showMessageBox(w, opts);
 function createWindow() {
   win = towerWindow();
   // 메뉴줄은 숨긴다(설정은 오른쪽 위 톱니). 메뉴의 단축키(다시 읽기, 개발자 도구, 끝내기)는 그대로 쓴다.
@@ -560,6 +579,8 @@ async function smoke(dir) {
     d = await until(async () => { const x = await debug(); return x && x.sessions.filter((s) => s.role === 'wk' && s.st === 'WORKING').length === 2 ? x : null; }, 12000);
     check('하달하면 워커가 일하는 중으로 뜬다', Boolean(d), d && d.sessions.map((s) => `${s.id}:${s.st}`));
     // 오퍼레이터 두 번 누르기 → 그 하달의 워커 목록(읽기 전용). 끝나면 창이 사라지므로 도는 동안 본다.
+    // 새 창이 뜨면 화면이 그쪽으로 움직인다(fitTree). 멈춘 뒤에 눌러야 두 번 누른 자리가 같다.
+    await until(async () => { const a = await debug(); await wait(250); const b = await debug(); return a && b && JSON.stringify(a.cam) === JSON.stringify(b.cam); }, 4000);
     const op1 = await rectOf('[aria-label="개발 Operator"] > div');
     if (op1) {
       await click(op1.x, op1.y); await click(op1.x, op1.y);
@@ -568,6 +589,14 @@ async function smoke(dir) {
       check('오퍼레이터를 두 번 누르면 그 하달의 워커 2명이 보인다(모델은 읽기 전용)', rows === 2, rows);
       await shot('03-running');
     } else check('오퍼레이터를 두 번 누르면 그 하달의 워커 2명이 보인다(모델은 읽기 전용)', false, '오퍼레이터 창 없음');
+    // 세션이 도는 동안 창을 닫으면 묻는다. [돌아가기]를 고르면 창은 그대로.
+    const asked = [];
+    const realAsk = askClose;
+    askClose = async (_w, opts) => { asked.push(opts); return { response: 1 }; };
+    win.close();
+    await wait(300);
+    askClose = realAsk;
+    check('세션이 도는 동안 창을 닫으면 "진행중인 세션이 있습니다." 경고와 [확인]·[돌아가기]가 뜨고, 돌아가기면 창이 남는다', asked.length === 1 && asked[0].message === '진행중인 세션이 있습니다.' && JSON.stringify(asked[0].buttons) === '["확인","돌아가기"]' && !win.isDestroyed() && win.isVisible(), asked.map((o) => o.message));
     d = await until(async () => { const x = await debug(); return x && x.coordSt === 'DONE' ? x : null; }, 25000);
     d = d ?? await debug();
     const runEvents = flowLog.slice(logFrom);
@@ -602,6 +631,7 @@ async function smoke(dir) {
     check('하위 세션 없이 답한 차례에는 세션이 뜨지 않는다', d.sessions.length === 0, d.sessions.map((s) => s.id));
     d = await until(async () => { const x = await debug(); return x && x.coordSt === 'READY' ? x : null; }, 10000);
     check('코디네이터가 잠잠해지면 READY로 돌아간다', d && d.coordSt === 'READY', d && d.coordSt);
+    check('도는 세션이 없으면 창을 닫을 때 묻지 않는다(진행 중 세션 0)', flow.busyCount() === 0, flow.busyCount());
     await shot('06-answer-only');
 
     // ---- /testgo: 화면 시험(어드바이저 3, 오퍼레이터 5, 워커 한 명씩 늘어남, Jev 번갈아, 정해진 시간 뒤 원래 화면) ----

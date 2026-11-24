@@ -162,6 +162,13 @@ export class FlowTracker {
     if (this.runId) this.send('coordinator.status', { status: s });
   }
 
+  // 진행 중인 세션 수(창을 닫을 때 경고에 쓴다): 도는 하위 세션 + 코디네이터가 일하는 중이면 1.
+  busyCount() {
+    const subs = [...this.sessions.values()].filter((s) => s.status === 'SPAWNING' || s.status === 'WORKING' || s.status === 'REVIEWING').length;
+    const coordinator = this.runId && (this.status === 'THINKING' || this.status === 'DELEGATING') ? 1 : 0;
+    return subs + coordinator;
+  }
+
   active() { return [...this.sessions.values()].some((s) => s.status === 'SPAWNING' || s.status === 'WORKING' || s.status === 'REVIEWING'); }
 
   startRun(text) {

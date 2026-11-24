@@ -69,6 +69,7 @@ test('흐름: 하달한 팀의 오퍼레이터와 하달 이슈의 워커만 뜬
   H.worker('h1', { event: 'start', issue: 12, model: 'gemini' });
   tick();
   assert.equal(f.status, 'DELEGATING');
+  assert.equal(f.busyCount(), 4, '창 닫기 경고: 오퍼레이터 1 + 워커 2 + 일하는 코디네이터 1');
   H.worker('h1', { event: 'end', issue: 11, status: '완료', attempts: 1, model: 'claude' });
   H.worker('h1', { event: 'end', issue: 12, status: '막힘', attempts: 3, model: 'gemini' });
   H.session('h1', { pid: 42, issues: [11, 12], endedAt: iso(clock.t) });
@@ -94,6 +95,7 @@ test('흐름: 하달한 팀의 오퍼레이터와 하달 이슈의 워커만 뜬
   tick(); tick();
   assert.equal(f.status, 'DONE');
   assert.equal(events.filter((e) => e.type === 'run.finished').length, 1);
+  assert.equal(f.busyCount(), 0, '다 끝나면 진행 중 세션 없음(창을 닫아도 묻지 않음)');
   // 끝난 세션은 잠시 뒤 사라진다. 오류 워커(#12)와 그 오퍼레이터(h1)는 남는다.
   const removed = events.filter((e) => e.type === 'session.removed').map((e) => e.id).sort();
   assert.deepEqual(removed, ['adv-1', 'op-h2', 'wk-h1-11']);
