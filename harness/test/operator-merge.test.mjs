@@ -750,6 +750,22 @@ test('enqueue 스크립트(I2): 막힘·보류·거부목록·반영됨·허용�
   assert.deepEqual(git(f.memo, 'ls-tree', '-r', '--name-only', 'refs/heads/integration/h1').split('\n').filter((x) => x.startsWith('k')), []);
 });
 
+test('enqueue 스크립트(결정 8-38): 워커가 묻고 아직 답을 받지 못한 이슈(질문 기록)는 합치지 않고 막힘으로 보고한다', T, async () => {
+  const f = fixture();
+  branch(f, 8, { 'feature8.txt': 'x\n' });
+  branch(f, 9, { 'half9.txt': 'x\n' });
+  writeFileSync(`${f.run}/handoffs/h1/question-9.json`, JSON.stringify({ issue: 9, requestedModel: 'claude', base: 'main', baseCommit: '0'.repeat(40), rounds: 1 }));
+  const states = [];
+  const c = collector();
+  const code = await enqueueMain(['--handoff', 'h1'], env(f), {
+    ...c.deps, runTests: passAll, fetchIssueData: async (n) => issue(n), setState: async (n, s) => states.push([n, s]),
+  });
+  assert.equal(code, 1);
+  assert.deepEqual(states, [[8, '리뷰대기']]);
+  assert.ok(c.out.join('\n').split('\n').includes('#9 | 막힘 | https://github.com/o/r/issues/9'));
+  assert.deepEqual(git(f.memo, 'ls-tree', '-r', '--name-only', 'refs/heads/integration/h1').split('\n').filter((x) => x.startsWith('half')), []);
+});
+
 test('enqueue 스크립트(I2): 이미 main에 있는 이슈는 미완료로 바꾸지 않고 건너뛴다(반영됨 줄)', T, async () => {
   const f = fixture();
   branch(f, 7, { 'feature7.txt': 'x\n' });

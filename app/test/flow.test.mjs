@@ -71,6 +71,9 @@ test('흐름: 하달한 팀의 오퍼레이터와 하달 이슈의 워커만 뜬
   assert.equal(f.status, 'DELEGATING');
   assert.equal(f.busyCount(), 4, '창 닫기 경고: 오퍼레이터 1 + 워커 2 + 일하는 코디네이터 1');
   H.worker('h1', { event: 'end', issue: 11, status: '완료', attempts: 1, model: 'claude' });
+  H.worker('h1', { event: 'end', issue: 12, status: '결정필요', attempts: 1, model: 'gemini' });
+  tick();
+  assert.equal(lastStatus(events, 'wk-h1-12'), 'WORKING', '워커가 물으면 오퍼레이터가 답할 때까지 일하는 중으로 둔다(오류가 아니다)');
   H.worker('h1', { event: 'end', issue: 12, status: '막힘', attempts: 3, model: 'gemini' });
   H.session('h1', { pid: 42, issues: [11, 12], endedAt: iso(clock.t) });
   H.dispatch('h1', { team: 'dev', requested: [11, 12], live: [11, 12], endedAt: iso(clock.t), sessionOk: true });

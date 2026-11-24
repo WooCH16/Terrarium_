@@ -31,6 +31,8 @@ function workScripts(config) {
         || (typeof config.baseHandoff === 'string' && /^h[1-9]\d*$/.test(config.baseHandoff) && config.baseHandoff !== config.handoff && new RegExp(`^${config.baseHandoff}/issue-[1-9][0-9]{0,8}$`).test(v)),
       // 서로 기대지 않는 이슈의 워커를 한꺼번에 띄운다: 바로 대기 번호를 받고 wait-operator로 결과를 받는다(background.mjs).
       '--detach': (v) => v === 'yes',
+      // 워커가 물은 이슈(종료 코드 4)를 오퍼레이터의 결정(.drafts/answer-<n>-h<N>.md)으로 이어 한다(결정 8-38). 경로는 받지 않는다.
+      '--answer': (v) => v === 'yes',
       required: ['--handoff', '--issue', '--model'] },
     'merge-adapter-enqueue.mjs': { '--handoff': handoff, required: ['--handoff'] },
     // run-worker가 9분 안에 안 끝나면 종료 코드 8과 대기 번호를 낸다. 이어서 기다리는 명령(run-8).

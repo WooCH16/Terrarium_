@@ -104,7 +104,8 @@ function coordinatorNote(row) {
 }
 
 function workerStatus(w) {
-  if (!w.done) return 'WORKING';
+  // 결정필요: 워커가 묻고 멈췄다. 오퍼레이터가 답해 이어 할 때까지 일하는 중으로 둔다(결정 8-38).
+  if (!w.done || w.status === '결정필요') return 'WORKING';
   return w.status === '완료' ? 'DONE' : 'ERROR';
 }
 function operatorStatus(h) {

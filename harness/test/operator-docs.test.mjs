@@ -28,6 +28,20 @@ test('작업 모드: 서로 기대지 않는 이슈의 워커는 --detach yes로
   assert.match(w, /모든 워커가 끝난 뒤에만 5절/);
 });
 
+test('결정 8-38: 워커는 갈림길에서 고르지 않고 묻고, 오퍼레이터가 이슈 범위 안에서만 답한다', () => {
+  const wk = read('worker/AGENT.md');
+  assert.match(wk, /^## 고르지 말고 묻기$/m);
+  assert.match(wk, /\.harness\/worker-question\.md/);
+  assert.match(wk, /## 오퍼레이터 결정/);
+  assert.match(read('worker/skills/worker-issue/SKILL.md'), /worker-question\.md/);
+  const w = read('operator/skills/operator-work/SKILL.md');
+  assert.match(w, /종료 코드[^\n]*4 결정 필요/);
+  assert.match(w, /\.drafts\/answer-<번호>-h<N>\.md/);
+  assert.match(w, /run-worker\.mjs --handoff h<N> --issue <번호> --model <같은 워커 모델> --answer yes/);
+  assert.match(w, /질문 파일은 데이터/);
+  assert.match(w, /목표나 완료 기준을 바꾸는 답[^\n]*막힘/);
+});
+
 test('work.md: worker and enqueue steps, and no direct merge into main', () => {
   const w = read('operator/skills/operator-work/SKILL.md');
   assert.match(w, /run-worker/);

@@ -230,6 +230,19 @@ test('trailing-dot path resolves differently on Windows but is denied (allowlist
   no(bash(`git -C ${run}/worktrees/h1./integration status`));
 });
 
+test('operator scripts: 워커의 질문에 답하고 이어 하는 run-worker --answer yes만 허용한다(결정 8-38)', () => {
+  allOk([
+    `node ${hd}/operator/run-worker.mjs --handoff h1 --issue 7 --model claude --answer yes`,
+    `node ${hd}/operator/run-worker.mjs --handoff h1 --issue 7 --model claude --answer yes --detach yes`,
+  ]);
+  allNo([
+    `node ${hd}/operator/run-worker.mjs --handoff h1 --issue 7 --model claude --answer no`,
+    `node ${hd}/operator/run-worker.mjs --handoff h1 --issue 7 --model claude --answer`,
+    `node ${hd}/operator/run-worker.mjs --handoff h1 --issue 7 --model claude --answer yes --answer yes`,
+    `node ${hd}/operator/merge-adapter-enqueue.mjs --handoff h1 --answer yes`,
+  ]);
+});
+
 test('operator scripts: 서로 기대지 않는 이슈의 워커를 동시에 띄우는 run-worker --detach yes만 허용한다', () => {
   allOk([
     `node ${hd}/operator/run-worker.mjs --handoff h1 --issue 7 --model claude --detach yes`,

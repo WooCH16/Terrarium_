@@ -7,7 +7,7 @@ import { resolve as resolvePath, dirname } from 'node:path';
 import { spawn as nodeSpawn, execFileSync } from 'node:child_process';
 import { loadOperatorConfig, ConfigError } from './config.mjs';
 import { handoffNames } from './handoff.mjs';
-import { workerEnv } from './run-worker.mjs';
+import { workerEnv, questionRecordFile } from './run-worker.mjs';
 import { formatLine, exitCode, STATES } from './report.mjs';
 import { assertPlain, isStopped, killTree as defaultKillTree, pruneReflectedHandoffs, readPruned } from './launch.mjs';
 import { makeGhDeps } from './run-operator.mjs';
@@ -934,6 +934,8 @@ async function runEnqueue({ run, config, cfg, handoff, env, deps }) {
   for (const n of numbers) {
     const state = stateOf(datas.get(n)?.labels);
     if (state !== null && ENQUEUE_KEEP.has(state)) skipped.push({ number: n, state, url: issueUrl(config, n, datas.get(n)) });
+    // 워커가 묻고 아직 답을 받지 못했다(질문 기록이 남음, 결정 8-38): 브랜치에 질문 전의 반쯤 한 커밋이 있을 수 있어 합치지 않는다.
+    else if (existsSync(questionRecordFile(run, handoff, n))) skipped.push({ number: n, state: LABEL.막힘, url: issueUrl(config, n, datas.get(n)) });
     else if (onMain.has(n)) skipped.push({ number: n, state: LABEL.반영됨, url: issueUrl(config, n, datas.get(n)) });
     else todo.push(n);
   }
