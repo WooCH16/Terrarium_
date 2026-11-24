@@ -272,7 +272,8 @@ const POLL_MS = 1000;
 let flowTimer = null;
 let flowRun = null;
 let blankSeq = 0;
-const flowLog = app.isPackaged ? null : []; // 스모크 시험이 보낸 이벤트 전체를 본다(화면 기록은 6줄만 남는다)
+// 스모크 시험만 보낸 이벤트 전체를 모은다(화면 기록은 6줄만 남는다). 보통 실행에서는 모으지 않는다(끝없이 쌓임).
+const flowLog = !app.isPackaged && process.env.TERRARIUM_SMOKE ? [] : null;
 const quietMs = !app.isPackaged && process.env.TERRARIUM_FLOW_QUIET_MS ? Number(process.env.TERRARIUM_FLOW_QUIET_MS) : undefined;
 function currentRunOrNull() { const r = readPrefs().currentRun; return allowedRun(r) ? r : null; }
 const lingerMs = !app.isPackaged && process.env.TERRARIUM_FLOW_LINGER_MS ? Number(process.env.TERRARIUM_FLOW_LINGER_MS) : undefined;
@@ -292,7 +293,8 @@ function startFlow() {
     const run = currentRunOrNull();
     if (run !== flowRun) { resetFlow(); return; }
     if (!run) return;
-    try { flow.update(readFlowSnapshot(run)); } catch { /* 기록을 쓰는 중에 읽음: 다음 차례에 다시 읽는다 */ }
+    // 이미 끝나 화면이 보지 않는 하달(flow의 기준점)은 다시 읽지 않는다.
+    try { flow.update(readFlowSnapshot(run, { skip: flow.mark?.done })); } catch { /* 기록을 쓰는 중에 읽음: 다음 차례에 다시 읽는다 */ }
   }, POLL_MS);
 }
 // ---- /testgo: 화면 시험 (app/lib/testgo.mjs) ----
@@ -381,11 +383,11 @@ ipcMain.handle('usage:get', () => {
     : '아직 없음: 코디네이터가 한 번 답한 뒤에 보입니다(한도 막대는 Claude Pro·Max 구독에서만 옵니다).';
   return { available: meters.length > 0, meters, note };
 });
+// 5분 기억한다. 읽는 중에 또 물으면 같은 결과를 기다린다(나중에 묻는 쪽이 "로그인 안 됨"을 잠깐 받지 않게).
 let ghLogin = { at: 0, value: null };
-async function githubLogin() {
+function githubLogin() {
   if (Date.now() - ghLogin.at < 300000) return ghLogin.value;
-  ghLogin = { at: Date.now(), value: null };
-  try { ghLogin.value = (await ghExec(['api', 'user', '--jq', '.login'])).trim() || null; } catch { /* 로그인 안 됨 */ }
+  ghLogin = { at: Date.now(), value: ghExec(['api', 'user', '--jq', '.login']).then((s) => s.trim() || null, () => null) };
   return ghLogin.value;
 }
 ipcMain.handle('account:get', async () => {
@@ -610,7 +612,7 @@ async function smoke(dir) {
     check('워커 모델은 하네스가 정한 값이다(claude, gemini)', by['wk-h1-11']?.model === 'claude' && by['wk-h1-12']?.model === 'gemini');
     await wait(800);
     d = await debug();
-    const removed = runEvents.concat(flowLog.slice(logFrom + runEvents.length)).filter((e) => e.type === 'session.removed').map((e) => e.id).sort();
+    const removed = flowLog.slice(logFrom).filter((e) => e.type === 'session.removed').map((e) => e.id).sort();
     check('일이 끝난 세션(조언 통과한 어드바이저, 끝난 워커·오퍼레이터)은 화면에서 사라진다', d.sessions.length === 0 && JSON.stringify(removed) === JSON.stringify(want) && d.coordSt === 'DONE', { left: d.sessions.map((s) => s.id), removed, coord: d.coordSt });
     const live = await js(`(document.querySelector('[role="toolbar"][aria-label="Status"]').textContent.match(/(\\d+) live/) || [])[1]`);
     check('live 수가 0으로 돌아온다', live === '0', live);

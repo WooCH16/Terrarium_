@@ -81,10 +81,12 @@ function readWorkers(file) {
   return [...byIssue.values()].filter((w) => w.started);
 }
 
-export function readHandoffs(run, alive = pidAlive) {
+// skip: 다시 읽지 않을 하달 이름(관제탑 흐름이 이미 끝난 것으로 본 하달). 그 하달은 { name, running: false }만 둔다.
+export function readHandoffs(run, alive = pidAlive, { skip } = {}) {
   const dir = `${run}/handoffs`;
   if (!existsSync(dir)) return [];
   return readdirSync(dir).filter((n) => /^h[1-9]\d*$/.test(n)).map((name) => {
+    if (skip?.has(name)) return { name, running: false, skipped: true };
     const d = `${dir}/${name}`;
     let session = null;
     try { session = JSON.parse(readFileSync(`${d}/session.json`, 'utf8')); } catch { /* 없음 */ }

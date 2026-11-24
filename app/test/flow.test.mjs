@@ -246,3 +246,41 @@ test('흐름: 새 지시가 와도 남은 세션은 그대로 있고, 새 세션
   const finals = events.slice(n).filter((e) => e.type === 'coordinator.log').map((e) => e.text);
   assert.ok(finals.includes('✓ 모든 하위 세션 완료'), finals.join(' | '));
 });
+
+test('기록 읽기: 쓰는 도중의 반쪽 줄은 세지 않고, 완성되면 그 줄을 놓치지 않는다. 새로 붙은 줄만 읽는다', () => {
+  const run = makeRun();
+  const clock = { t: T0 };
+  const { f, events, tick } = tracker(run, clock, () => false);
+  f.reset(readFlowSnapshot(run));
+  f.userLine('조언 받아줘');
+  const row = JSON.stringify({ time: iso(clock.t), agent_type: null, allow: true, reason: '허용', tool_name: 'Agent', summary: '반쪽 줄 시험' });
+  appendFileSync(`${run}/guard.log`, row.slice(0, 30)); // 하네스가 쓰는 도중
+  tick();
+  assert.equal(spawned(events).length, 0);
+  appendFileSync(`${run}/guard.log`, `${row.slice(30)}\n`); // 다 씀
+  tick();
+  assert.deepEqual(spawned(events).map((x) => x.id), ['adv-1'], '완성된 줄을 건너뛰지 않는다');
+  appendFileSync(`${run}/guard.log`, '{깨진 줄}\n');
+  appendFileSync(`${run}/guard.log`, `${JSON.stringify({ time: iso(clock.t), agent_type: null, allow: true, tool_name: 'Agent', summary: '둘째' })}\n`);
+  const snap = readFlowSnapshot(run);
+  assert.equal(snap.guard.length, 3, '깨진 줄도 자리는 센다');
+  assert.equal(snap.guard[1], null);
+  f.update(snap);
+  assert.deepEqual(spawned(events).map((x) => x.id), ['adv-1', 'adv-2']);
+  // 파일을 새로 쓰면(줄어듦) 처음부터 다시 읽는다
+  writeFileSync(`${run}/guard.log`, `${row}\n`);
+  assert.equal(readFlowSnapshot(run).guard.length, 1);
+});
+
+test('기록 읽기: 이미 끝난 하달(skip)은 폴더를 읽지 않고 이름만 둔다', () => {
+  const run = makeRun();
+  const clock = { t: T0 };
+  const H = harnessOf(run, clock);
+  H.dispatch('h1', { team: 'dev', requested: [1], live: [1], endedAt: iso(T0), sessionOk: true });
+  H.dispatch('h2', { team: 'sec', requested: [2], live: [2] });
+  const hs = readFlowSnapshot(run, { skip: new Set(['h1']) }).handoffs;
+  assert.deepEqual(hs.map((h) => [h.name, Boolean(h.skipped), h.team ?? null]), [['h2', false, 'sec'], ['h1', true, null]]);
+  const { f } = tracker(run, clock, () => false);
+  f.reset(readFlowSnapshot(run));
+  assert.ok(f.mark.done.has('h1') && f.mark.done.has('h2'), '앱을 켤 때 끝난(돌지 않는) 하달이 기준점');
+});

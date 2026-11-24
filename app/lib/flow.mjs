@@ -17,7 +17,7 @@
 // 화면을 비우지 않는다: 남은 세션은 그대로 두고 새로 생긴 세션만 더하며, 끝난 세션은 하나씩 사라진다(차례마다 끝 판정만 다시 센다).
 // 화면을 비우는 것은 실행 폴더를 바꿀 때뿐이다.
 // 기준점: 앱을 켤 때와 새 실행을 시작할 때, 그때까지 끝난 기록은 다시 그리지 않는다. 도는 하달은 이어서 그린다.
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { readHandoffs, pidAlive } from './status.mjs';
 
 export const TEAM_NAMES = { dev: '개발', design: '디자인', tester: '테스터', plan: '기획', sec: '보안' };
@@ -30,24 +30,49 @@ export function operatorLabel(team, research = false) {
   return research ? '조사 Operator' : 'Operator';
 }
 
-const readLines = (file) => {
-  if (!existsSync(file)) return [];
-  let text;
-  try { text = readFileSync(file, 'utf8'); } catch { return []; }
-  const out = [];
-  for (const l of text.split(/\r?\n/)) {
-    if (!l.trim()) continue;
-    try { out.push(JSON.parse(l)); } catch { out.push(null); } // 깨진 줄도 자리는 센다(줄 번호가 기준점이다)
+// JSON 줄 기록 읽기. 기록은 덧붙이기만 하므로 파일마다 읽은 곳(바이트)을 기억해 새로 붙은 줄만 읽는다(1초마다 부른다).
+// 줄바꿈으로 끝난 줄만 확정한다: 하네스가 쓰는 도중의 반쪽 줄을 "깨진 줄"로 세면 다음 차례에 완성된 그 줄을 건너뛴다.
+// 끝에 줄바꿈 없이 남은 조각은 온전한 JSON이면 이번에만 더하고(기억하지 않음), 아니면 다음 차례에 다시 읽는다.
+// 파일이 줄었거나 새로 만들어졌으면 처음부터 읽는다.
+const lineCache = new Map(); // 파일 → { birth, offset, lines }
+function parseLine(l, out) {
+  if (!l.trim()) return;
+  try { out.push(JSON.parse(l)); } catch { out.push(null); } // 깨진 줄도 자리는 센다(줄 번호가 기준점이다)
+}
+function readLines(file) {
+  let st;
+  try { st = statSync(file); } catch { lineCache.delete(file); return []; }
+  let c = lineCache.get(file);
+  if (!c || st.size < c.offset || st.birthtimeMs !== c.birth) c = { birth: st.birthtimeMs, offset: 0, lines: [] };
+  let tail = '';
+  if (st.size > c.offset) {
+    let buf;
+    try {
+      const fd = openSync(file, 'r');
+      try {
+        buf = Buffer.alloc(st.size - c.offset);
+        buf = buf.subarray(0, readSync(fd, buf, 0, buf.length, c.offset));
+      } finally { closeSync(fd); }
+    } catch { return c.lines; }
+    const end = buf.lastIndexOf(0x0a);
+    if (end >= 0) {
+      for (const l of buf.subarray(0, end).toString('utf8').split(/\r?\n/)) parseLine(l, c.lines);
+      c.offset += end + 1;
+    }
+    tail = buf.subarray(end + 1).toString('utf8');
   }
-  return out;
-};
+  lineCache.set(file, c);
+  if (!tail.trim()) return c.lines;
+  try { return c.lines.concat([JSON.parse(tail)]); } catch { return c.lines; }
+}
 
 // 실행 폴더의 지금 기록. alive는 시험에서 바꾼다.
-export function readFlowSnapshot(run, { alive = pidAlive } = {}) {
+// skip: 이미 끝나 화면이 보지 않는 하달 이름(FlowTracker의 기준점). 그 폴더는 다시 읽지 않고 이름만 둔다.
+export function readFlowSnapshot(run, { alive = pidAlive, skip } = {}) {
   return {
     guard: readLines(`${run}/guard.log`),
     advice: readLines(`${run}/advice-log.jsonl`),
-    handoffs: existsSync(`${run}/handoffs`) ? readHandoffs(run, alive) : [],
+    handoffs: existsSync(`${run}/handoffs`) ? readHandoffs(run, alive, { skip }) : [],
   };
 }
 

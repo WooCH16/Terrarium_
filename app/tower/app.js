@@ -606,6 +606,14 @@ class Component extends DCLogic {
       }
       this.refresh();
     }
+    // 그릴 것(파동, 마우스 자국, 움직임 고리)이 없으면 캔버스를 한 번 비운 뒤로는 매 프레임 다시 그리지 않는다.
+    // 고리는 속도가 0.036을 넘어야, 자국은 점이 둘 이상이어야 보이므로 이 조건 밖에서는 그려지는 것이 없다.
+    const v0 = this.vel;
+    if (!(this.waves && this.waves.length) && !(this.trail && this.trail.length > 1) && !(v0 && Math.hypot(v0.x, v0.y) > 0.02)) {
+      if (this.drawn) { ctx.clearRect(0, 0, this.w, this.h); this.drawn = false; }
+      return;
+    }
+    this.drawn = true;
     ctx.clearRect(0, 0, this.w, this.h);
     const now = performance.now();
     const [r, g, b] = this.rgb(o.color);
