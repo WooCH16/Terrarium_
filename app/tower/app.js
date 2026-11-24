@@ -134,6 +134,29 @@ class Component extends DCLogic {
     this.rpGrab = rpBegin('rp');
     this.rpRs = rpBegin('rpw');
     this.panelRs = panelBegin('panelw');
+    // 왼쪽 위(실행 폴더) 칸과 오른쪽 위(live·시각·사용량·톱니) 칸은 각 모서리에 붙어 있고, 끌거나 창 크기·해상도가
+    // 바뀌어도 늘 화면 안에 남는다. 들어온 값을 화면 크기에 맞춰 잘라 돌려준다(없는 키는 지금 값).
+    this.fitPanels = (p = {}) => {
+      const s = this.state;
+      const root = document.getElementById('root');
+      const r = root ? root.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight };
+      const W = Math.max(240, r.width), H = Math.max(160, r.height);
+      const cl = (v, lo, hi) => Math.max(lo, Math.min(Math.max(lo, hi), v));
+      const lpW = cl(p.lpW ?? s.lpW, 120, Math.min(900, W - 16));
+      const rpW = cl(p.rpW ?? s.rpW, 120, Math.min(900, W - 16));
+      return {
+        lpW, rpW,
+        lpX: cl(p.lpX ?? s.lpX, 0, W - lpW - 8),
+        lpY: cl(p.lpY ?? s.lpY, 0, H - 56),
+        rpR: cl(p.rpR ?? s.rpR, 0, W - rpW - 8),
+        rpY: cl(p.rpY ?? s.rpY, 0, H - 56)
+      };
+    };
+    this.onWinResize = () => {
+      const f = this.fitPanels();
+      const s = this.state;
+      if (Object.keys(f).some((k) => f[k] !== s[k])) this.setState(f);
+    };
     // 실행 폴더(하네스가 설치된 폴더). 탭은 열어 둔 실행 폴더들이고, 고른 탭의 폴더에서 코디네이터가 돈다.
     // 탭 목록은 이 컴퓨터에만 기억한다(없어도 지금 실행 폴더 하나로 시작한다).
     this.state.folder = '';
@@ -210,19 +233,19 @@ class Component extends DCLogic {
       if (e.buttons === 0) { this.dragEnd(e); return; }
       this.onMove && this.onMove(e);
       if (d.mode === 'panel') {
-        this.setState({ lpX: Math.max(0, d.x0 + e.clientX - d.sx), lpY: Math.max(0, d.y0 + e.clientY - d.sy) });
+        this.setState(this.fitPanels({ lpX: d.x0 + e.clientX - d.sx, lpY: d.y0 + e.clientY - d.sy }));
         return;
       }
       if (d.mode === 'rp') {
-        this.setState({ rpR: Math.max(0, d.r0 - (e.clientX - d.sx)), rpY: Math.max(0, d.y0 + e.clientY - d.sy) });
+        this.setState(this.fitPanels({ rpR: d.r0 - (e.clientX - d.sx), rpY: d.y0 + e.clientY - d.sy }));
         return;
       }
       if (d.mode === 'rpw') {
-        this.setState({ rpW: Math.max(120, Math.min(900, d.w0 - (e.clientX - d.sx))) });
+        this.setState(this.fitPanels({ rpW: d.w0 - (e.clientX - d.sx) }));
         return;
       }
       if (d.mode === 'panelw') {
-        this.setState({ lpW: Math.max(120, Math.min(900, d.w0 + e.clientX - d.sx)) });
+        this.setState(this.fitPanels({ lpW: d.w0 + e.clientX - d.sx }));
         return;
       }
       const z = this.cam.z || 1;
@@ -560,6 +583,8 @@ class Component extends DCLogic {
   }
   componentDidMount() {
     this.clockTimer = setInterval(() => this.setState({ now: Date.now() }), 5000);
+    window.addEventListener('resize', this.onWinResize);
+    this.onWinResize();
     const be = this.backend;
     this.unsubscribe = be.orchestrator.onEvent((ev) => this.onEvent(ev));
     // 읽기 전용 상태(스모크 시험 app/main.js와 개발자 도구용).
@@ -603,7 +628,7 @@ class Component extends DCLogic {
       this.setState({ ws, activeWs: active ? active.id : 0, folder: r.current || '', folderNote: r.current ? '' : '실행 폴더가 없습니다. 설정의 설치 탭에서 설치하거나 [다른 폴더 열기…]로 고르세요.' });
     });
   }
-  componentWillUnmount() { if (this.unsubscribe) this.unsubscribe(); clearInterval(this.clockTimer); clearInterval(this.pullTimer); clearInterval(this.usageTimer); this.timers.forEach(clearTimeout); this.timers = []; this.detach(); this.canvas = null; }
+  componentWillUnmount() { window.removeEventListener('resize', this.onWinResize); if (this.unsubscribe) this.unsubscribe(); clearInterval(this.clockTimer); clearInterval(this.pullTimer); clearInterval(this.usageTimer); this.timers.forEach(clearTimeout); this.timers = []; this.detach(); this.canvas = null; }
   draw() {
     const ctx = this.ctx; if (!ctx) return;
     const o = this.opt();

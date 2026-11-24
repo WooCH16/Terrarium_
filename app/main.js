@@ -2,7 +2,7 @@
 // 렌더러는 Node에 직접 닿지 않는다(contextIsolation, sandbox, preload.cjs의 좁은 API만).
 // 본창은 관제탑 화면(app/tower: 코디네이터 창 안에 진짜 Claude Code 터미널, 하달된 만큼만 뜨는 Operator·Worker 창)이고,
 // 설정 화면(계정·설치·진행)은 본창 위에 겹쳐 띄운다.
-import { app, BrowserWindow, WebContentsView, Menu, ipcMain, safeStorage, dialog, shell } from 'electron';
+import { app, BrowserWindow, WebContentsView, Menu, ipcMain, safeStorage, dialog, shell, screen } from 'electron';
 import { spawn } from 'node:child_process';
 import { readdirSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
@@ -88,9 +88,15 @@ function guard(w) {
 // 흰 제목 표시줄은 숨긴다. 창 단추(최소화·최대화·닫기)만 배경색 위에 남고, 위쪽 TITLE_H는 창을 끄는 자리다
 // (tower/index.html의 #tb, 설정 화면도 그 아래에 붙는다).
 const TITLE_H = 32;
+// 처음 크기는 1440×900이되 화면(작업 영역)보다 크지 않게: 작은 화면에서 창이 넘쳐 오른쪽 위 칸이 잘렸다(샌드박스, 2026-11-24).
+function towerSize() {
+  const wa = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workAreaSize;
+  const width = Math.min(1440, wa.width), height = Math.min(900, wa.height);
+  return { width, height, minWidth: Math.min(720, width), minHeight: Math.min(520, height) };
+}
 function towerWindow({ show = true } = {}) {
   const w = new BrowserWindow({
-    width: 1440, height: 900, minWidth: 720, minHeight: 520, show, title: 'Terrarium', backgroundColor: '#0e0d0b',
+    ...towerSize(), center: true, show, title: 'Terrarium', backgroundColor: '#0e0d0b',
     titleBarStyle: 'hidden', titleBarOverlay: { color: '#0e0d0b', symbolColor: '#a8a59c', height: TITLE_H },
     webPreferences: { ...webPreferences(), backgroundThrottling: false },
   });
@@ -643,6 +649,15 @@ async function smoke(dir) {
     await shot('02b-limits');
     await click(usageBtn.x, usageBtn.y);
     await wait(200);
+    // 창이 작아져도(해상도가 낮아도) 왼쪽 위·오른쪽 위 칸은 창 안에 남는다.
+    const [cw0, ch0] = win.getContentSize();
+    win.setContentSize(740, 540);
+    await wait(500);
+    const inView = await js(`(() => { const W = window.innerWidth, H = window.innerHeight; return ['nav[aria-label="Workspace"]', '[role="toolbar"][aria-label="Status"]'].map((q) => { const r = document.querySelector(q).getBoundingClientRect(); return { q, l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), W, H, ok: r.left >= 0 && r.right <= W && r.top >= 0 && r.top < H - 40 }; }); })()`);
+    await shot('02c-small-window');
+    check('창을 740×540으로 줄여도 실행 폴더 칸과 사용량·톱니 칸이 창 안에 보인다', inView.every((x) => x.ok), inView);
+    win.setContentSize(cw0, ch0);
+    await wait(400);
     // 업데이트 알림 띠: 받아 두면 [지금 재시작]·[나중에], [나중에]는 숨긴다(설치판에서만 오는 상태를 흉내).
     toTower('update:status', { state: 'ready', version: '9.9.9' });
     await wait(200);
