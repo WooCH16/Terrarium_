@@ -575,6 +575,8 @@ class Component extends DCLogic {
     };
     pull();
     this.pullTimer = setInterval(pull, 30000);
+    // 사용량은 코디네이터가 답할 때마다 statusline 파일이 바뀐다. 작은 파일 하나라 3초마다 읽어 곧바로 보인다(30초면 첫 답 뒤에도 한참 "모름").
+    this.usageTimer = setInterval(() => be.usage.get().then((v) => { if (JSON.stringify(v) !== JSON.stringify(this.usage)) { this.usage = v; this.refresh(); } }), 3000);
     // 업데이트 알림(설치판에서만 옴). [나중에]는 이 버전 알림만 숨긴다.
     if (be.update) {
       const onUpd = (u) => { if (u) this.setState({ upd: u }); };
@@ -594,7 +596,7 @@ class Component extends DCLogic {
       this.setState({ ws, activeWs: active ? active.id : 0, folder: r.current || '', folderNote: r.current ? '' : '실행 폴더가 없습니다. 설정의 설치 탭에서 설치하거나 [다른 폴더 열기…]로 고르세요.' });
     });
   }
-  componentWillUnmount() { if (this.unsubscribe) this.unsubscribe(); clearInterval(this.clockTimer); clearInterval(this.pullTimer); this.timers.forEach(clearTimeout); this.timers = []; this.detach(); this.canvas = null; }
+  componentWillUnmount() { if (this.unsubscribe) this.unsubscribe(); clearInterval(this.clockTimer); clearInterval(this.pullTimer); clearInterval(this.usageTimer); this.timers.forEach(clearTimeout); this.timers = []; this.detach(); this.canvas = null; }
   draw() {
     const ctx = this.ctx; if (!ctx) return;
     const o = this.opt();
@@ -816,7 +818,7 @@ class Component extends DCLogic {
       usageTop: (() => {
         const m = (this.usage.meters || [])[0];
         const len = 2 * Math.PI * 9;
-        if (!m) return { pct: '–', resetText: '사용량 모름', title: this.usage.note || '사용량을 아직 읽지 못했습니다', dash: '0 ' + len.toFixed(1) };
+        if (!m) return { pct: '–', resetText: '첫 답 뒤 표시', title: this.usage.note || '사용량을 아직 읽지 못했습니다', dash: '0 ' + len.toFixed(1) };
         const on = Math.max(0, Math.min(100, m.pct)) / 100 * len;
         return { pct: m.pct, resetText: m.resetText, title: m.label + ' ' + m.pct + '% · ' + m.resetText, dash: on.toFixed(1) + ' ' + (len - on).toFixed(1) };
       })(),
