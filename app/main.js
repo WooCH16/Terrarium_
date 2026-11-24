@@ -12,7 +12,7 @@ import { CoordinatorTerminal, coordinatorEnv } from './lib/terminal.mjs';
 import { KeyStore, KEY_NAMES, KEY_LABELS } from './lib/keys.mjs';
 import { readStatus } from './lib/status.mjs';
 import { FlowTracker, readFlowSnapshot } from './lib/flow.mjs';
-import { testgoTimeline, scanTestgo } from './lib/testgo.mjs';
+import { testgoTimeline, scanTestgo, typedLines } from './lib/testgo.mjs';
 import { install, checkInstallInput, originRepo } from './lib/install.mjs';
 import { UpdateNotifier } from './lib/updater.mjs';
 import { buildLimits } from './lib/limits.mjs';
@@ -369,14 +369,12 @@ ipcMain.on('testgo:start', () => startTestgo());
 let testLine = '';
 
 // 코디네이터에 보낸 줄(대략): Enter로 보낼 때 화면 기록에 한 줄 남기고, 도는 세션이 없으면 새 실행을 연다.
+// 마우스·포커스 같은 제어 순서는 글자로 세지 않는다(lib/testgo.mjs typedLines).
 let typed = '';
 function noteInput(data) {
-  for (const ch of String(data).replace(/\x1b\[[0-9;?]*[A-Za-z~]/g, '').replace(/\x1b./g, '')) {
-    if (ch === '\r') { flow?.userLine(typed); typed = ''; }
-    else if (ch === '\x7f' || ch === '\b') typed = typed.slice(0, -1);
-    else if (ch === '\x03' || ch === '\x15' || ch === '\x1b') typed = '';
-    else if (ch >= ' ') typed = (typed + ch).slice(-300);
-  }
+  const r = typedLines(typed, data);
+  typed = r.typed;
+  for (const l of r.lines) flow?.userLine(l);
 }
 
 // ---- 관제탑 상단: 실행 폴더 탭, 사용량, 계정, 코디네이터 정보 (실제로 읽은 값만) ----

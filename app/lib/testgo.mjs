@@ -71,13 +71,47 @@ export function testgoTimeline({ runId = 'testgo', durationMs = 180000, stepMs =
   return out;
 }
 
+// 터미널 입력(xterm이 보내는 것)을 제어 순서와 글자로 나눈다.
+// Claude Code가 마우스 추적을 켜면 마우스를 움직일 때마다 `ESC [<35;74;15M`(SGR)이 온다. 예전 규칙은 `<`를 몰라
+// `ESC [`만 지우고 `<35;74;15M`을 친 글자로 남겼다(화면 기록 줄의 이상한 글씨, 2026-11-24).
+// 순서: X10 마우스(ESC [ M + 3바이트), CSI(ESC [ 매개 0x30-0x3F, 중간 0x20-0x2F, 끝 0x40-0x7E), OSC·DCS 등(BEL이나 ESC \ 까지),
+// SS3(ESC O x), Alt+키(ESC x). 끝에 혼자 온 ESC는 Esc 키다(글자로 돌려준다).
+const TOKEN = /\x1b\[M[\s\S]{3}|\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\x1b[\]P^_X][\s\S]*?(?:\x07|\x1b\\)|\x1bO[\s\S]|\x1b[\s\S]|[\s\S]/gu;
+// 입력 칸의 글자를 바꾸지 않는 순서: 마우스(SGR <…M/m, X10), 포커스(ESC [I, ESC [O), 붙여넣기 표시(ESC [200~, ESC [201~)
+const PASSIVE = /^(?:\x1b\[M[\s\S]{3}|\x1b\[<[\d;]*[Mm]|\x1b\[[IO]|\x1b\[20[01]~)$/;
+export function termTokens(data) {
+  const out = [];
+  for (const t of String(data).match(TOKEN) ?? []) {
+    if (t.length > 1 && t[0] === '\x1b') out.push({ seq: t, edit: !PASSIVE.test(t) });
+    else out.push({ ch: t });
+  }
+  return out;
+}
+
+// 코디네이터에 보낸 줄을 화면 기록용으로 따라간다(main.js noteInput). 제어 순서는 글자가 아니다.
+// 돌려주는 것: { typed(지금 치고 있는 줄), lines(Enter로 보낸 줄들) }
+export function typedLines(typed, data) {
+  const lines = [];
+  for (const t of termTokens(data)) {
+    if (t.seq) continue;
+    const ch = t.ch;
+    if (ch === '\r') { lines.push(typed); typed = ''; }
+    else if (ch === '\x7f' || ch === '\b') typed = typed.slice(0, -1);
+    else if (ch === '\x03' || ch === '\x15' || ch === '\x1b') typed = '';
+    else if (ch >= ' ') typed = (typed + ch).slice(-300);
+  }
+  return { typed, lines };
+}
+
 // 터미널 입력 한 덩어리에서 /testgo 줄을 찾는다(터미널 렌더러와 같은 규칙, 시험용). line은 지금까지 친 줄.
 // 돌려주는 것: { line, forward(코디네이터에 보낼 것), fire(/testgo를 쳤는지) }
+// 제어 순서는 그대로 보낸다. 화살표 등 입력 칸을 바꾸는 순서면 친 줄을 잊고, 마우스·포커스는 줄을 건드리지 않는다.
 export function scanTestgo(line, data) {
-  if (/^\x1b./.test(data)) return { line: '', forward: data, fire: false }; // 화살표 등 제어 순서
   let forward = '';
   let fire = false;
-  for (const ch of data) {
+  for (const t of termTokens(data)) {
+    if (t.seq) { forward += t.seq; if (t.edit) line = ''; continue; }
+    const ch = t.ch;
     if (ch === '\r' && line.trim() === TESTGO_COMMAND) {
       forward += '\x7f'.repeat(line.length); // 코디네이터 입력 칸에 친 글자를 지운다(Enter는 보내지 않는다)
       line = '';

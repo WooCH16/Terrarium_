@@ -1,7 +1,7 @@
 // /testgo 화면 시험(app/lib/testgo.mjs) 시험: 시간표 모양과 터미널 입력 가로채기.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { testgoTimeline, scanTestgo } from '../lib/testgo.mjs';
+import { testgoTimeline, scanTestgo, typedLines } from '../lib/testgo.mjs';
 
 const spawnedAt = (tl) => tl.filter((x) => x.ev.type === 'session.spawned').map((x) => ({ at: x.at, ...x.ev.session }));
 
@@ -48,4 +48,32 @@ test('/testgo 줄은 코디네이터에 보내지 않고(친 글자는 지움), 
   assert.equal(r.fire, true, '지우고 고친 줄도 된다');
   r = scanTestgo('/testgo', '\x1b[A');
   assert.deepEqual([r.fire, r.line, r.forward], [false, '', '\x1b[A'], '화살표는 그대로 보내고 줄을 잊는다');
+});
+
+// 화면 기록 줄에 "<35;74;15M<35;77;…"가 쌓이던 문제: Claude Code가 마우스 추적을 켜면 xterm이 마우스 위치를 SGR 순서로 보낸다.
+const MOUSE = '\x1b[<35;74;15M\x1b[<35;77;16M\x1b[<0;10;5m';
+test('마우스·포커스·붙여넣기 표시는 친 글자가 아니다: 화면 기록 줄에 들어가지 않는다', () => {
+  let s = typedLines('', `정렬${MOUSE}\x1b[I 기능\x1b[O 하달해줘\r`);
+  assert.deepEqual(s.lines, ['정렬 기능 하달해줘']);
+  assert.equal(s.typed, '');
+  s = typedLines('', `${MOUSE}${MOUSE}`);
+  assert.deepEqual([s.lines, s.typed], [[], ''], '마우스만 움직이면 아무것도 남지 않는다');
+  s = typedLines('', '\x1b[200~붙여 넣은 글\x1b[201~\r');
+  assert.deepEqual(s.lines, ['붙여 넣은 글']);
+  s = typedLines('', '\x1b[M #!'); // 옛 X10 마우스(ESC [ M + 3바이트)
+  assert.equal(s.typed, '');
+  s = typedLines('abc', '\x1b');
+  assert.equal(s.typed, '', 'Esc 키 하나는 친 줄을 비운다');
+  s = typedLines('ab', '\x7fc\r');
+  assert.deepEqual(s.lines, ['ac']);
+});
+
+test('/testgo를 치는 사이에 마우스를 움직여도 /testgo로 알아본다(마우스는 그대로 보낸다)', () => {
+  let r = scanTestgo('', '/test');
+  r = scanTestgo(r.line, MOUSE);
+  assert.deepEqual([r.line, r.forward], ['/test', MOUSE]);
+  r = scanTestgo(r.line, 'go');
+  r = scanTestgo(r.line, `${MOUSE}\r`);
+  assert.equal(r.fire, true);
+  assert.equal(r.forward, `${MOUSE}${'\x7f'.repeat(7)}`);
 });
