@@ -51,7 +51,7 @@ node <harnessDir>/operator/run-worker.mjs --handoff h<N> --issue <번호> --mode
    node <harnessDir>/operator/run-worker.mjs --handoff h<N> --issue <번호> --model <같은 워커 모델> --answer yes
    ```
    같은 워크트리·브랜치에서 질문 전의 작업 위에 이어 한다. 결과는 위의 종료 코드 규칙대로 받는다.
-5. 질문은 이슈마다 2번까지다. 세 번째로 물으면 `run-worker`가 그 이슈를 `막힘`(종료 코드 1)으로 끝낸다.
+5. `run-worker`는 쓴 답 파일을 지운다. 두 번째 질문에는 새 답 파일을 쓴다(앞 결정은 스크립트가 워커에게 다시 넘긴다). 질문은 이슈마다 2번까지다. 세 번째로 물으면 `run-worker`가 그 이슈를 `막힘`(종료 코드 1)으로 끝낸다.
 6. 결과 보고서의 사실 칸에 `- 워커 질문: <횟수>번, 오퍼레이터 결정: <고른 것 한 줄씩>`을 더한다(없으면 `- 워커 질문: 없음`).
 
 답하지 않은 질문이 남은 이슈는 `merge-adapter-enqueue`가 합치지 않고 `막힘`으로 보고한다.

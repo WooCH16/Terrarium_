@@ -906,8 +906,14 @@ test('질문은 이슈마다 2번까지: 세 번째 질문은 막힘(종료 코�
   const second = await exec(s, [...ARGS, '--answer', 'yes']);
   assert.equal(second.code, 4);
   assert.equal(JSON.parse(second.out[0]).round, 2);
+  assert.ok(!existsSync(`${s.root}/issues/.drafts/answer-7-h1.md`), '쓴 답 파일은 지운다(다음 질문에 옛 답이 쓰이지 않게)');
+  const stale = await exec(s, [...ARGS, '--answer', 'yes']);
+  assert.equal(stale.code, 2, '새 답 없이 이어 하면 거부');
   answer(s, '빨강으로 하세요.');
   const third = await exec(s, [...ARGS, '--answer', 'yes']);
+  const a3 = s.attempts().at(-1).input;
+  assert.match(a3, /파랑으로 하세요\.[\s\S]*빨강으로 하세요\./, '새 맥락의 워커가 앞선 결정도 모두 본다');
+  assert.match(a3, /버튼 색을[\s\S]*두 번째 질문/);
   assert.equal(third.code, 1);
   const rec = JSON.parse(third.out[0]);
   assert.equal(rec.status, '막힘');

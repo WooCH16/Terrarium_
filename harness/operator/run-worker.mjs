@@ -256,7 +256,7 @@ export const WORKER_DOC = new URL('../worker/AGENT.md', import.meta.url);
 export const WORKER_SKILL = new URL('../worker/skills/worker-issue/SKILL.md', import.meta.url);
 const dropFrontmatter = (t) => t.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n(?:\r?\n)?/, '');
 export const workerDoc = () => `${readFileSync(WORKER_DOC, 'utf8').trimEnd()}\n\n${dropFrontmatter(readFileSync(WORKER_SKILL, 'utf8')).trimEnd()}`;
-export function inputText({ issue, worktree, body, failures, decision = null }, doc = workerDoc()) {
+export function inputText({ issue, worktree, body, failures, decisions = [] }, doc = workerDoc()) {
   const parts = [
     doc.trimEnd(),
     '',
@@ -271,7 +271,7 @@ export function inputText({ issue, worktree, body, failures, decision = null }, 
     '## 이슈 본문',
     body,
   ];
-  if (decision) parts.push('', '## 앞서 한 질문', decision.question, '', '## 오퍼레이터 결정', decision.answer);
+  for (const d of decisions) parts.push('', '## 앞서 한 질문', d.question, '', '## 오퍼레이터 결정', d.answer);
   if (failures.length) parts.push('', '## 이전 실패 이유', ...failures.map((f) => `- ${f}`));
   parts.push('');
   return parts.join('\n');
@@ -393,18 +393,20 @@ export async function main(argv, env = process.env, deps = {}) {
     // 이어 하기(--answer yes): 질문 기록과 오퍼레이터의 답이 있어야 한다. 시작점·모델은 질문 기록을 따른다.
     const recordFile = questionRecordFile(run, handoff, issue);
     let record = null;
-    let decision = null;
+    // 앞선 질문과 오퍼레이터 결정 쌍(차례대로). 워커는 매번 새 맥락이라 앞 결정을 모두 다시 넘긴다.
+    let decisions = [];
+    const aFile = answerFile(config.issuesClone, handoff, issue);
     if (resume) {
       record = readQuestionRecord(recordFile, issue);
       if (!record) return fail(`이슈 #${issue}의 질문 기록이 없습니다. --answer yes는 워커가 물은 이슈(종료 코드 ${QUESTION_EXIT})에만 씁니다.`);
       if (record.requestedModel !== requested) return fail(`이어 하기는 처음 부른 모델(${record.requestedModel})로 부릅니다. --model ${record.requestedModel}`);
-      const aFile = answerFile(config.issuesClone, handoff, issue);
       let ast;
       try { ast = lstatSync(aFile); } catch { return fail(`오퍼레이터 결정 파일이 없습니다: ${aFile}`); }
       if (!ast.isFile() || ast.size > MAX_ANSWER_BYTES) return fail(`오퍼레이터 결정 파일이 일반 파일이 아니거나 너무 큽니다: ${aFile}`);
       const text = readFileSync(aFile, 'utf8').trim();
       if (!text) return fail(`오퍼레이터 결정 파일이 비어 있습니다: ${aFile}`);
-      decision = { question: record.question ?? '(기록 없음)', answer: text };
+      const earlier = Array.isArray(record.decisions) ? record.decisions.filter((d) => typeof d?.question === 'string' && typeof d?.answer === 'string') : [];
+      decisions = [...earlier, { question: record.question ?? '(기록 없음)', answer: text }];
       base = record.base;
     }
     let baseCommit;
@@ -536,7 +538,7 @@ export async function main(argv, env = process.env, deps = {}) {
       attempts++;
       rmSync(resultFile, { force: true });
       rmSync(`${worktree}/${QUESTION_REL}`, { force: true }); // 앞 시도·앞 질문의 파일은 이번 시도의 질문이 아니다
-      writeFileSync(promptFile, inputText({ issue, worktree, body, failures, decision }));
+      writeFileSync(promptFile, inputText({ issue, worktree, body, failures, decisions }));
       let pid;
       let onSignal = null;
       let r;
@@ -601,11 +603,13 @@ export async function main(argv, env = process.env, deps = {}) {
     }
     let mainAfter = null;
     try { mainAfter = mainHash(); } catch { /* 기록하지 못한 값은 null */ }
+    // 쓴 답은 지운다: 다음 질문에 옛 답이 그대로 쓰이지 않게(결정은 질문 기록의 decisions에 남는다).
+    if (resume) rmSync(aFile, { force: true });
     if (asked) {
       const round = (record?.rounds ?? 0) + 1;
       if (round <= MAX_QUESTIONS) {
         // 질문 기록은 handoffs/ 아래(오퍼레이터·코디네이터가 쓰지 못하는 곳)에 둔다. 질문 본문은 출력하지 않고 경로만 낸다.
-        writeFileSync(recordFile, JSON.stringify({ issue, requestedModel: requested, base, baseCommit, rounds: round, question: asked.text.slice(0, MAX_QUESTION_BYTES), at: now().toISOString() }, null, 2));
+        writeFileSync(recordFile, JSON.stringify({ issue, requestedModel: requested, base, baseCommit, rounds: round, question: asked.text.slice(0, MAX_QUESTION_BYTES), decisions, at: now().toISOString() }, null, 2));
         write(JSON.stringify(result({ status: '결정필요', attempts, failures, question: `worktrees/${handoff}/issue-${issue}/${QUESTION_REL}`, round, mainBefore, mainAfter, commit: null, actualModel: observed.model })));
         logEnd({ status: '결정필요', actualModel: observed.model });
         logEnd = null;
