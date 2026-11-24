@@ -249,7 +249,9 @@ test('--base(8-31): 반영 전 하달 h1 위에서 시작한 하달의 새 워�
   assert.equal(launched[0].handoff, 'h2');
   assert.equal(launched[0].baseHandoff, 'h1', '세션 훅에 시작 지점 하달을 넘긴다');
   assert.match(launched[0].prompt, /^- 시작 지점: h1 \(아직 main에 반영 전\)$/m);
-  assert.ok(existsSync(`${f.run}/worktrees/h2/issue-46/quickstart.md`), '앞 하달 이슈의 파일이 새 워크트리에 있다');
+  // 세션이 끝나면 작업 폴더는 지워진다(브랜치는 남는다). 앞 하달 이슈의 파일이 새 이슈 브랜치에 있는지로 본다.
+  assert.equal(existsSync(`${f.run}/worktrees/h2`), false, '세션이 끝나면 이 하달의 작업 폴더를 지운다');
+  assert.ok(git(f.memo, 'ls-tree', '--name-only', 'refs/heads/h2/issue-46').split('\n').includes('quickstart.md'), '앞 하달 이슈의 파일이 새 이슈 브랜치(워크트리에서 만든 것)에 있다');
   const rec = readJson(`${f.run}/handoffs/h2/dispatch.json`);
   assert.deepEqual([rec.team, rec.base, rec.issueBases, rec.excluded], ['tester', 'h1', { 46: 'h1/issue-45' }, []]);
   const start = lines(`${f.run}/handoffs/h2/workers.jsonl`)[0];

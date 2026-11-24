@@ -8,7 +8,7 @@ import { nextHandoff } from './handoff.mjs';
 import { formatReport, exitCode, STATES, NO_LABEL, ENSURED_LABELS } from './report.mjs';
 import { parseDependsOn, parseTeam, parseKind, TEAM_NAMES } from './issue-body.mjs';
 import { provenIssuesOnMain, makeFetchIssueData } from './merge-adapter.mjs';
-import { loadModeDocs, launchSession, cleanupHandoff, isStopped, handoffHasWork } from './launch.mjs';
+import { loadModeDocs, launchSession, cleanupHandoff, isStopped, handoffHasWork, removeHandoffWorktrees } from './launch.mjs';
 import { REPORT_HEAD, VERDICT_HEAD, LABEL } from './protocol.mjs';
 
 const fwd = (p) => String(p).replace(/\\/g, '/').replace(/\/+$/, '');
@@ -350,6 +350,8 @@ export async function main(argv, env = process.env, deps = {}) {
       if (isStopped(run, handoff)) return stopped;
       ok = r.code === 0 && !r.timedOut;
     }
+    // 세션이 끝났다: 이 하달의 워커 작업 폴더를 지운다(브랜치는 리뷰·반영에 쓰므로 남긴다). 실패해도 결과는 바꾸지 않는다.
+    try { (deps.removeHandoffWorktrees ?? removeHandoffWorktrees)({ handoff, run, memo }); } catch { /* 다음 정리(반영 뒤·멈춤·다시 띄우기)에서 지운다 */ }
 
     // 결과 없음 횟수를 갱신한다(새 하달이고 세션이 끝까지 돈 경우만: 중단·시작 실패는 위에서 이미 돌아갔다).
     const exhausted = new Set();

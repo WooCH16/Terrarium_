@@ -43,7 +43,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   for (const k of ['HARNESS_PI_BIN', 'HARNESS_AGY_BIN', 'HARNESS_CLAUDE_BIN']) if (!env[k]) env[k] = trap;
   console.log(`${mode}: 시험 파일 ${chosen.length}개`);
   // 데스크톱 앱의 논리 시험(Electron 없이 돈다)은 빠른 시험에 넣는다.
-  const appTests = mode === 'slow' ? [] : [join('app', 'test', 'lib.test.mjs'), join('app', 'test', 'flow.test.mjs'), join('app', 'test', 'testgo.test.mjs'), join('app', 'test', 'updater.test.mjs'), join('app', 'test', 'limits.test.mjs')];
+  const appTests = mode === 'slow' ? [] : [join('app', 'test', 'lib.test.mjs'), join('app', 'test', 'flow.test.mjs'), join('app', 'test', 'testgo.test.mjs'), join('app', 'test', 'updater.test.mjs'), join('app', 'test', 'limits.test.mjs'), join('app', 'test', 'links.test.mjs')];
   const r = spawnSync(process.execPath, ['--test', '--test-concurrency=2', ...chosen.map((f) => join('harness', 'test', f)), ...appTests], { cwd: root, env, stdio: 'inherit' });
   let code = r.status ?? 1;
   if (existsSync(trapLog)) {

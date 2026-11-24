@@ -38,11 +38,15 @@
       cursorBlink: true,
       scrollback: 5000,
       allowProposedApi: false,
+      // Claude Code가 OSC 8로 내보내는 링크. 기본 처리기는 영어 confirm 창을 띄우고 앱 안 창을 열려다 막혔다.
+      // 누르면 기본 브라우저로 연다(메인 프로세스가 http·https만 통과시킨다).
+      linkHandler: { allowNonHttpProtocols: false, activate: (_e, uri) => { T.openLink(uri); } },
       theme: { background: '#0e0d0b', foreground: '#e8e6e1', cursor: '#d97757', selectionBackground: '#5a3a2c' },
     });
     const fit = new window.FitAddon.FitAddon();
     term.loadAddon(fit);
     term.open(box);
+    window.__terrariumTerm = term; // 스모크 시험·개발자 도구용(읽기·쓰기는 이 화면 안에서만)
     if (window.WebglAddon) {
       try {
         const gl = new window.WebglAddon.WebglAddon();

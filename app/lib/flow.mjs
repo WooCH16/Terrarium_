@@ -103,8 +103,10 @@ function coordinatorNote(row) {
   return null;
 }
 
-function workerStatus(w) {
+function workerStatus(w, operatorRunning) {
   if (!w.done) return 'WORKING';
+  // 결정필요: 워커가 묻고 멈췄다(결정 8-38). 오퍼레이터 세션이 도는 동안은 답을 기다리는 중이고, 끝났으면 답을 받지 못한 것이다.
+  if (w.status === '결정필요') return operatorRunning ? 'WORKING' : 'ERROR';
   return w.status === '완료' ? 'DONE' : 'ERROR';
 }
 function operatorStatus(h) {
@@ -351,7 +353,7 @@ export class FlowTracker {
           this.spawn({ id: wid, role: 'worker', parentId: opId, label: `Worker #${w.issue}`, model: w.model ?? 'claude', task: `이슈 #${w.issue}` }, 'WORKING');
           this.log(`→ Worker #${w.issue} 호출 · ${w.model ?? '모델 모름'}`, 'worker');
         }
-        const ws = workerStatus(w);
+        const ws = workerStatus(w, operatorStatus(h) === 'WORKING');
         const before = this.sessions.get(wid).status;
         this.setSession(wid, ws);
         if (ws !== before && ws !== 'WORKING') this.log(`${ws === 'DONE' ? '←' : '✗'} Worker #${w.issue} ${w.status ?? ''}${w.attempts ? ` · ${w.attempts}회` : ''}`, ws === 'DONE' ? 'worker' : 'error');

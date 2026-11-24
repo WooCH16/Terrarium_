@@ -229,6 +229,106 @@ export function handoffHasWork({ handoff, memo }, deps = {}) {
   return out.split('\n').map((s) => s.trim()).some((b) => b === `integration/${handoff}` || b.startsWith(`${handoff}/`));
 }
 
+// 하달 이름 공간(<실행 폴더>/worktrees/<h>)의 작업 폴더 목록. 링크나 밖을 가리키는 경로가 있으면 아무것도 지우기 전에 던진다.
+// 부모(worktrees)를 믿지 않고 글자 그대로의 경로와 비교한다: realpath(run)/worktrees/<h>여야 한다.
+function handoffFolders({ handoff, run }) {
+  const root = handoffNames(handoff, null, run).integrationFolder.replace(/\/integration$/, '');
+  let runReal = null;
+  try { runReal = realpathSync.native(run); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  const wt = root.slice(0, root.lastIndexOf('/'));
+  const wtExists = runReal !== null && assertPlain(wt, `${runReal}/worktrees`, 'worktrees');
+  const exists = wtExists && assertPlain(root, `${runReal}/worktrees/${handoff}`, `worktrees/${handoff}`);
+  const folders = [];
+  if (exists) {
+    const rootReal = realpathSync.native(root);
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      const folder = `${root}/${entry.name}`;
+      if (entry.isSymbolicLink()) throw new Error(`정리를 거부합니다: ${folder}이(가) 링크입니다. 아무것도 지우지 않았습니다.`);
+      if (!entry.isDirectory()) continue;
+      assertPlain(folder, `${rootReal}/${entry.name}`, folder);
+      folders.push(folder);
+    }
+  }
+  return { root, exists, folders };
+}
+
+function removeFolders({ git, memo, root, exists, folders }) {
+  for (const folder of folders) {
+    try { git(memo, ['worktree', 'remove', '--force', folder]); } catch { /* 아래에서 폴더를 직접 지운다 */ }
+    try { rmSync(folder, { recursive: true, force: true }); } catch (e) { throw new Error(`정리 실패: 폴더를 지우지 못했습니다(${folder}): ${e.code ?? e.message}`); }
+  }
+  if (exists) {
+    try { rmSync(root, { recursive: true, force: true }); } catch (e) { throw new Error(`정리 실패: 폴더를 지우지 못했습니다(${root}): ${e.code ?? e.message}`); }
+  }
+}
+
+// 하달이 끝난 뒤: 그 하달의 작업 폴더(worktrees/<h>/의 이슈 워크트리·통합 폴더·시험 클론)만 지운다. 브랜치는 남긴다.
+// 리뷰어는 작업 폴더가 없으면 대상 프로젝트에서 같은 커밋을 본다. 반영(land)은 필요하면 폴더를 새로 만든다.
+// 예전에는 다시 띄울 때·멈출 때·트레인 뒤에만 지워서, 그냥 끝난 하달의 워크트리가 실행 폴더마다 쌓였다(2026-11-24, 48개).
+// 돌려주는 값: 지운 폴더 이름들.
+export function removeHandoffWorktrees({ handoff, run, memo }, deps = {}) {
+  checkHandoff(handoff);
+  const git = deps.git ?? defaultGit;
+  const { root, exists, folders } = handoffFolders({ handoff, run });
+  removeFolders({ git, memo, root, exists, folders });
+  try { git(memo, ['worktree', 'prune']); } catch { /* 목록 정리만 못 해도 폴더는 지웠다 */ }
+  return folders.map((f) => f.slice(f.lastIndexOf('/') + 1));
+}
+
+// 하달이 아직 도는가: 끝난 시각이 없고, 멈춤 표시가 없고, 적힌 프로세스가 살아 있으면. 모르면 돈다고 본다(지우지 않는 쪽).
+export function handoffRunning(run, handoff) {
+  const dir = `${run}/handoffs/${handoff}`;
+  if (existsSync(`${dir}/stopped.json`)) return false;
+  let ended = false;
+  try { ended = Boolean(JSON.parse(readFileSync(`${dir}/dispatch.json`, 'utf8')).endedAt); } catch { /* 기록 없음 */ }
+  if (ended) return false;
+  let pids = [];
+  try { const s = JSON.parse(readFileSync(`${dir}/session.json`, 'utf8')); pids = [s.pid, s.runnerPid, s.operatorPid].filter((p) => Number.isSafeInteger(p) && p > 0); } catch { return false; }
+  return pids.some((p) => { try { process.kill(p, 0); return true; } catch (e) { return e.code === 'EPERM'; } });
+}
+
+// 반영 뒤 브랜치 정리: 이슈 브랜치(<h>/issue-<n>)의 이슈가 모두 반영된(proven: main에 있는 이슈 번호) 하달만
+// cleanupHandoff로 브랜치·작업 폴더를 지운다. 같은 이슈를 다뤘던 옛 시도(거부돼 다시 보낸 하달)도 여기서 지워진다.
+// 반영 안 된 이슈가 하나라도 있거나, 도는 하달이거나, 이슈 브랜치가 없는 하달은 남긴다.
+// 돌려주는 값: { cleaned: 지운 하달, failed: [{ handoff, reason }] }
+export function pruneReflectedHandoffs({ run, memo, proven, isRunning = (h) => handoffRunning(run, h) }, deps = {}) {
+  const git = deps.git ?? defaultGit;
+  const byHandoff = new Map();
+  for (const b of git(memo, ['for-each-ref', '--format=%(refname:lstrip=2)', 'refs/heads/']).split('\n').map((s) => s.trim())) {
+    const m = /^(h[1-9]\d*)\/issue-([1-9]\d*)$/.exec(b);
+    if (!m) continue;
+    if (!byHandoff.has(m[1])) byHandoff.set(m[1], []);
+    byHandoff.get(m[1]).push(Number(m[2]));
+  }
+  const cleaned = [];
+  const failed = [];
+  const order = [...byHandoff.keys()].sort((a, b) => a.slice(1) - b.slice(1));
+  for (const h of order) {
+    const issues = byHandoff.get(h).sort((a, b) => a - b);
+    if (!issues.every((n) => proven.has(n))) continue;
+    if (isRunning(h)) continue;
+    try {
+      // 정리 기록을 먼저 남긴다: 나중에 이 하달을 다시 반영하면 브랜치 없이도 상태를 보고한다(merge-adapter runLand).
+      const dir = `${run}/handoffs/${h}`;
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(`${dir}/pruned.json`, JSON.stringify({ issues, at: new Date().toISOString() }));
+      (deps.cleanupHandoff ?? cleanupHandoff)({ handoff: h, run, memo }, deps);
+      cleaned.push(h);
+    } catch (e) { failed.push({ handoff: h, reason: String(e?.message ?? e).split('\n')[0] }); }
+  }
+  return { cleaned, failed };
+}
+
+// pruneReflectedHandoffs가 남긴 정리 기록의 이슈 번호들. 없거나 모양이 틀리면 null.
+export function readPruned(run, handoff) {
+  checkHandoff(handoff);
+  try {
+    const j = JSON.parse(readFileSync(`${run}/handoffs/${handoff}/pruned.json`, 'utf8'));
+    const issues = Array.isArray(j?.issues) ? j.issues.filter((n) => Number.isSafeInteger(n) && n > 0) : [];
+    return issues.length ? issues : null;
+  } catch { return null; }
+}
+
 // 해당 하달의 worktrees/<h>/, integration/<h>, <h>/* 브랜치만 지운다. 결과를 다시 확인하고 남은 것이 있으면 던진다.
 // 주의: --handoff로 이어받은 하달에서 첫 시도가 실패하면 그 하달의 이전 작업 폴더·브랜치도 함께 지워진다(이름 공간 단위 정리).
 export function cleanupHandoff({ handoff, run, memo }, deps = {}) {
@@ -247,33 +347,11 @@ export function cleanupHandoff({ handoff, run, memo }, deps = {}) {
   };
 
   // 1. 아무것도 지우기 전에 링크 검사와 브랜치 조회를 끝낸다.
-  // 부모(worktrees)를 믿지 않고 글자 그대로의 경로와 비교한다: realpath(run)/worktrees/<h>여야 한다.
-  let runReal = null;
-  try { runReal = realpathSync.native(run); } catch (e) { if (e.code !== 'ENOENT') throw e; }
-  const wt = root.slice(0, root.lastIndexOf('/'));
-  const wtExists = runReal !== null && assertPlain(wt, `${runReal}/worktrees`, 'worktrees');
-  const exists = wtExists && assertPlain(root, `${runReal}/worktrees/${handoff}`, `worktrees/${handoff}`);
-  const folders = [];
-  if (exists) {
-    const rootReal = realpathSync.native(root);
-    for (const entry of readdirSync(root, { withFileTypes: true })) {
-      const folder = `${root}/${entry.name}`;
-      if (entry.isSymbolicLink()) throw new Error(`정리를 거부합니다: ${folder}이(가) 링크입니다. 아무것도 지우지 않았습니다.`);
-      if (!entry.isDirectory()) continue;
-      assertPlain(folder, `${rootReal}/${entry.name}`, folder);
-      folders.push(folder);
-    }
-  }
+  const { exists, folders } = handoffFolders({ handoff, run });
   const branches = listOwn();
 
   // 2. 지운다.
-  for (const folder of folders) {
-    try { git(memo, ['worktree', 'remove', '--force', folder]); } catch { /* 아래에서 폴더를 직접 지운다 */ }
-    try { rmSync(folder, { recursive: true, force: true }); } catch (e) { throw new Error(`정리 실패: 폴더를 지우지 못했습니다(${folder}): ${e.code ?? e.message}`); }
-  }
-  if (exists) {
-    try { rmSync(root, { recursive: true, force: true }); } catch (e) { throw new Error(`정리 실패: 폴더를 지우지 못했습니다(${root}): ${e.code ?? e.message}`); }
-  }
+  removeFolders({ git, memo, root, exists, folders });
   try { git(memo, ['worktree', 'prune']); } catch { /* 아래 확인에서 걸린다 */ }
   for (const branch of branches) {
     try { git(memo, ['branch', '-D', branch]); } catch { /* 아래 확인에서 걸린다 */ }

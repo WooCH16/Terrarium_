@@ -38,6 +38,31 @@ function tracker(run, clock, alive) {
 const spawned = (events) => events.filter((e) => e.type === 'session.spawned').map((e) => e.session);
 const lastStatus = (events, id) => events.filter((e) => e.type === 'session.status' && e.id === id).at(-1)?.status;
 
+test('흐름(결정 8-38): 워커가 묻고 답을 받지 못한 채 오퍼레이터가 끝나면 그 워커는 오류로 닫힌다(일하는 중으로 남지 않는다)', () => {
+  const run = makeRun();
+  const clock = { t: T0 };
+  const H = harnessOf(run, clock);
+  const alivePids = new Set([42]);
+  const { f, events, tick } = tracker(run, clock, (p) => alivePids.has(p));
+  f.reset(readFlowSnapshot(run));
+  f.userLine('하달해줘');
+  H.dispatch('h1', { team: 'dev', requested: [11], live: [11] });
+  H.session('h1', { pid: 42, issues: [11] });
+  H.worker('h1', { event: 'start', issue: 11, model: 'claude' });
+  H.worker('h1', { event: 'end', issue: 11, status: '결정필요', attempts: 1, model: 'claude' });
+  tick();
+  assert.equal(lastStatus(events, 'wk-h1-11'), 'WORKING', '오퍼레이터가 답하는 동안');
+  H.worker('h1', { event: 'start', issue: 11, model: 'claude' });
+  H.worker('h1', { event: 'end', issue: 11, status: '결정필요', attempts: 1, model: 'claude' });
+  tick();
+  assert.equal(events.filter((e) => e.type === 'session.spawned' && e.session.id === 'wk-h1-11').length, 1, '이어 하기의 두 번째 start로 카드가 둘이 되지 않는다');
+  alivePids.delete(42);
+  H.session('h1', { pid: 42, issues: [11], endedAt: iso(clock.t) });
+  H.dispatch('h1', { team: 'dev', requested: [11], live: [11], endedAt: iso(clock.t), sessionOk: true });
+  tick();
+  assert.equal(lastStatus(events, 'wk-h1-11'), 'ERROR', '일하는 중으로 남지 않는다(창 닫기 경고의 워커 수에서 빠진다)');
+});
+
 test('흐름: 하달한 팀의 오퍼레이터와 하달 이슈의 워커만 뜬다(어드바이저 1, 개발 하달 워커 2, 테스터 하달 워커 0)', () => {
   const run = makeRun();
   const clock = { t: T0 };
@@ -71,6 +96,9 @@ test('흐름: 하달한 팀의 오퍼레이터와 하달 이슈의 워커만 뜬
   assert.equal(f.status, 'DELEGATING');
   assert.equal(f.busyCount(), 4, '창 닫기 경고: 오퍼레이터 1 + 워커 2 + 일하는 코디네이터 1');
   H.worker('h1', { event: 'end', issue: 11, status: '완료', attempts: 1, model: 'claude' });
+  H.worker('h1', { event: 'end', issue: 12, status: '결정필요', attempts: 1, model: 'gemini' });
+  tick();
+  assert.equal(lastStatus(events, 'wk-h1-12'), 'WORKING', '워커가 물으면 오퍼레이터가 답할 때까지 일하는 중으로 둔다(오류가 아니다)');
   H.worker('h1', { event: 'end', issue: 12, status: '막힘', attempts: 3, model: 'gemini' });
   H.session('h1', { pid: 42, issues: [11, 12], endedAt: iso(clock.t) });
   H.dispatch('h1', { team: 'dev', requested: [11, 12], live: [11, 12], endedAt: iso(clock.t), sessionOk: true });

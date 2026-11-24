@@ -24,7 +24,7 @@ const git = (cwd, ...a) => execFileSync('git', ['-C', cwd, ...a], { encoding: 'u
 
 // 가짜 러너: 시도마다 FAKE_LOG에 기록을 남기고 FAKE_PLAN의 단계대로 행동한다.
 const FAKE = `
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 const E = process.env;
 const plan = JSON.parse(readFileSync(E.FAKE_PLAN, 'utf8'));
@@ -40,6 +40,7 @@ writeFileSync(dir + '/attempt-' + n + '.json', JSON.stringify({
   input: safe('.harness/worker-input.md'),
   settings: si > -1 ? safe(argv[si + 1]) : null,
   session: safe(E.FAKE_SESSION),
+  ask: { file: E.HARNESS_ASK_FILE ?? null, prefix: E.HARNESS_ANSWER_PREFIX ?? null, issue: E.HARNESS_WORKER_ISSUE ?? null },
   gitcfg: { c: E.GIT_CONFIG_COUNT ?? null, k0: E.GIT_CONFIG_KEY_0 ?? null, v0: E.GIT_CONFIG_VALUE_0 ?? null, k1: E.GIT_CONFIG_KEY_1 ?? null, v1: E.GIT_CONFIG_VALUE_1 ?? null },
 }));
 const step = plan[Math.min(n - 1, plan.length - 1)];
@@ -88,6 +89,24 @@ else if (s.do === 'nohash') { commit(false); result({ hash: 'abcdef1234567' }); 
 else if (s.do === 'main-commit') { commit(false); result(); git('-C', E.FAKE_TARGET, ...['-c','user.name=x','-c','user.email=x@x','commit','--allow-empty','-m','sneaky']); }
 else if (s.do === 'stop') { writeFileSync(E.FAKE_STOP, '{}'); process.exit(1); }
 else if (s.do === 'sleep') { await new Promise((r) => setTimeout(r, 60000)); }
+else if (s.do === 'ask') {
+  if (s.commit) commit(false);
+  mkdirSync('.harness', { recursive: true });
+  writeFileSync('.harness/worker-question.md', '## 이슈 번호\\n' + (s.issue ?? E.FAKE_ISSUE) + '\\n\\n## 질문\\n' + (s.q ?? '버튼 색을 파랑과 빨강 중 무엇으로 할까요?') + '\\n');
+  if (s.alsoResult) result();
+  if (s.exit) process.exit(s.exit);
+}
+else if (s.do === 'live-ask') {
+  // pi-ask.js 확장처럼: 질문 파일을 쓰고 답 파일을 기다렸다가 받고 이어 한다.
+  mkdirSync(E.HARNESS_ASK_FILE.replace(/[\\\\/][^\\\\/]*$/, ''), { recursive: true });
+  writeFileSync(E.HARNESS_ASK_FILE, '## 질문 번호\\n1-1\\n\\n## 종류\\n질문\\n\\n## 이슈 번호\\n' + E.HARNESS_WORKER_ISSUE + '\\n\\n## 질문\\n파랑? 빨강?\\n');
+  const answerFile = E.HARNESS_ANSWER_PREFIX + '1-1.md';
+  const t0 = Date.now();
+  while (!existsSync(answerFile) && Date.now() - t0 < 20000) await new Promise((r) => setTimeout(r, 100));
+  writeFileSync(dir + '/answer-' + n + '.txt', existsSync(answerFile) ? readFileSync(answerFile, 'utf8') : '(없음)');
+  rmSync(E.HARNESS_ASK_FILE, { force: true }); rmSync(answerFile, { force: true });
+  commit(false); result();
+}
 process.exit(0);
 `;
 
@@ -788,4 +807,181 @@ test('M6: defaultAvailable은 셸 없이 띄울 수 없는 .CMD·.BAT 래퍼를 
     writeFileSync(`${d}/codexbin.exe`, '');
     assert.equal(defaultAvailable(env, cfg)('codex'), true);
   } finally { rmSync(d, { recursive: true, force: true }); }
+});
+
+// ---------- 워커가 고르지 않고 묻는다(결정 8-38): 질문 → 오퍼레이터 결정 → 이어서 ----------
+const QFILE = 'worktrees/h1/issue-7/.harness/worker-question.md';
+const answer = (s, text = '파랑으로 하세요.') => { mkdirSync(`${s.root}/issues/.drafts`, { recursive: true }); writeFileSync(`${s.root}/issues/.drafts/answer-7-h1.md`, text); };
+const workerLog = (s) => readFileSync(`${s.run}/handoffs/h1/workers.jsonl`, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+
+test('질문: 종료 코드 4, 결정필요, 시도를 더 쓰지 않고 질문 파일 경로만 낸다(본문은 내지 않는다)', T, async () => {
+  const s = setup();
+  s.setPlan({ do: 'ask', commit: true });
+  const r = await exec(s, ARGS);
+  assert.equal(r.code, 4);
+  assert.deepEqual(r.err, []);
+  assert.equal(r.out.length, 1);
+  const rec = JSON.parse(r.out[0]);
+  assert.equal(rec.status, '결정필요');
+  assert.equal(rec.attempts, 1);
+  assert.equal(rec.question, QFILE);
+  assert.equal(rec.round, 1);
+  assert.doesNotMatch(r.out[0], /파랑/);
+  assert.equal(s.attempts().length, 1);
+  assert.ok(existsSync(`${s.run}/${QFILE}`), '질문 파일은 워크트리에 남는다');
+  assert.ok(existsSync(`${s.run}/handoffs/h1/question-7.json`), '질문 기록');
+  assert.equal(git(s.target, 'rev-parse', '--verify', 'refs/heads/h1/issue-7').length, 40, '브랜치는 남는다');
+  assert.equal(workerLog(s).at(-1).status, '결정필요');
+});
+
+test('질문과 결과 파일이 함께 있으면 질문이 이긴다', T, async () => {
+  const s = setup();
+  s.setPlan({ do: 'ask', commit: true, alsoResult: true });
+  const r = await exec(s, ARGS);
+  assert.equal(r.code, 4);
+  assert.equal(JSON.parse(r.out[0]).status, '결정필요');
+});
+
+test('이슈 번호가 다르거나 질문 칸이 비면 질문이 아니라 실패한 시도로 센다', T, async () => {
+  const s = setup();
+  s.setPlan({ do: 'ask', issue: '99' }, { do: 'ask', q: ' ' }, 'ok');
+  const r = await exec(s, ARGS);
+  assert.equal(r.code, 0);
+  const rec = JSON.parse(r.out[0]);
+  assert.equal(rec.attempts, 3);
+  assert.match(rec.failures[0], /질문 파일/);
+  assert.match(rec.failures[1], /질문 파일/);
+});
+
+test('앞 시도가 남긴 질문 파일은 다음 시도에서 질문으로 보지 않는다(러너가 실패로 끝난 시도의 질문도 아니다)', T, async () => {
+  const s = setup();
+  s.setPlan({ do: 'ask', exit: 1 }, 'ok');
+  const r = await exec(s, ARGS);
+  assert.equal(r.code, 0);
+  assert.equal(JSON.parse(r.out[0]).attempts, 2);
+});
+
+test('이어서(--answer yes): 오퍼레이터 결정과 앞 질문이 입력에 붙고, 같은 워크트리·브랜치에서 끝난다', T, async () => {
+  const s = setup();
+  s.setPlan({ do: 'ask', commit: true }, 'ok');
+  assert.equal((await exec(s, ARGS)).code, 4);
+  answer(s);
+  const r = await exec(s, [...ARGS, '--answer', 'yes']);
+  assert.equal(r.code, 0, r.err.join('\n'));
+  const rec = JSON.parse(r.out[0]);
+  assert.equal(rec.status, '완료');
+  const [, a2] = s.attempts();
+  assert.match(a2.input, /## 오퍼레이터 결정\n[\s\S]*파랑으로 하세요\./);
+  assert.match(a2.input, /## 앞서 한 질문\n[\s\S]*버튼 색을 파랑과 빨강/);
+  assert.equal(a2.cwd.replace(/\\/g, '/').toLowerCase(), `${s.run}/worktrees/h1/issue-7`.toLowerCase());
+  assert.ok(existsSync(`${s.run}/worktrees/h1/issue-7/feature-1.txt`), '질문 전의 작업이 남아 있다');
+  assert.ok(!existsSync(`${s.run}/handoffs/h1/question-7.json`), '끝나면 질문 기록을 지운다');
+  assert.ok(!existsSync(`${s.run}/${QFILE}`), '이어 할 때 앞 질문 파일을 지운다');
+  assert.equal(workerLog(s).filter((e) => e.event === 'start').length, 2);
+});
+
+test('이어서: 질문 기록이 없으면 종료 코드 2(같은 하달 재작업 통로가 아니다)', T, async () => {
+  const s = setup();
+  answer(s);
+  const r = await exec(s, [...ARGS, '--answer', 'yes']);
+  assert.equal(r.code, 2);
+  assert.match(r.err.join('\n'), /질문 기록/);
+  assert.equal(s.attempts().length, 0);
+});
+
+test('이어서: 답 파일이 없으면 종료 코드 2, 질문 기록은 남는다', T, async () => {
+  const s = setup();
+  s.setPlan({ do: 'ask' });
+  assert.equal((await exec(s, ARGS)).code, 4);
+  const r = await exec(s, [...ARGS, '--answer', 'yes']);
+  assert.equal(r.code, 2);
+  assert.match(r.err.join('\n'), /answer-7-h1\.md/);
+  assert.ok(existsSync(`${s.run}/handoffs/h1/question-7.json`));
+});
+
+test('이어서: --base와 함께 쓰거나 다른 모델을 주면 종료 코드 2', T, async () => {
+  const s = setup({ allowed: ['claude', 'gemini'] });
+  s.setPlan({ do: 'ask' });
+  assert.equal((await exec(s, ARGS)).code, 4);
+  answer(s);
+  assert.equal((await exec(s, [...ARGS, '--answer', 'yes', '--base', 'main'])).code, 2);
+  const other = await exec(s, ['--handoff', 'h1', '--issue', '7', '--model', 'gemini', '--answer', 'yes']);
+  assert.equal(other.code, 2);
+  assert.match(other.err.join('\n'), /모델/);
+});
+
+test('질문은 이슈마다 2번까지: 세 번째 질문은 막힘(종료 코드 1)', T, async () => {
+  const s = setup();
+  s.setPlan({ do: 'ask' }, { do: 'ask', q: '두 번째 질문' }, { do: 'ask', q: '세 번째 질문' });
+  assert.equal((await exec(s, ARGS)).code, 4);
+  answer(s);
+  const second = await exec(s, [...ARGS, '--answer', 'yes']);
+  assert.equal(second.code, 4);
+  assert.equal(JSON.parse(second.out[0]).round, 2);
+  assert.ok(!existsSync(`${s.root}/issues/.drafts/answer-7-h1.md`), '쓴 답 파일은 지운다(다음 질문에 옛 답이 쓰이지 않게)');
+  const stale = await exec(s, [...ARGS, '--answer', 'yes']);
+  assert.equal(stale.code, 2, '새 답 없이 이어 하면 거부');
+  answer(s, '빨강으로 하세요.');
+  const third = await exec(s, [...ARGS, '--answer', 'yes']);
+  const a3 = s.attempts().at(-1).input;
+  assert.match(a3, /파랑으로 하세요\.[\s\S]*빨강으로 하세요\./, '새 맥락의 워커가 앞선 결정도 모두 본다');
+  assert.match(a3, /버튼 색을[\s\S]*두 번째 질문/);
+  assert.equal(third.code, 1);
+  const rec = JSON.parse(third.out[0]);
+  assert.equal(rec.status, '막힘');
+  assert.match(rec.failures.at(-1), /질문 한도/);
+  assert.ok(!existsSync(`${s.run}/handoffs/h1/question-7.json`));
+});
+
+// ---------- 살아 있는 질문(결정 8-39, Pi 확장 pi-ask.js): 워커가 묻고 기다리면 오퍼레이터가 답해 같은 세션에서 이어 간다 ----------
+test('살아 있는 질문: 러너에 통로 환경 변수를 주고, 질문이 뜨면 onAsk로 알리고, 답을 받으면 onAnswered, 결과에 liveQuestions', T, async () => {
+  const s = setup();
+  s.setPlan('live-ask');
+  const asks = [];
+  let answered = 0;
+  const r = await exec(s, ARGS, {
+    onAsk: (info) => { asks.push(info); writeFileSync(info.answer, '파랑으로 한다.'); },
+    onAnswered: () => { answered++; },
+  });
+  assert.equal(r.code, 0, r.err.join('\n'));
+  assert.equal(asks.length, 1);
+  assert.deepEqual(Object.keys(asks[0]).sort(), ['answer', 'id', 'issue', 'kind', 'question']);
+  assert.equal(asks[0].issue, 7);
+  assert.equal(asks[0].kind, '질문');
+  assert.equal(asks[0].question, 'worktrees/h1/issue-7/.harness/asking.md');
+  assert.equal(asks[0].answer, `${s.root}/issues/.drafts/answer-7-h1-q1-1.md`);
+  assert.ok(answered >= 1);
+  assert.equal(JSON.parse(r.out[0]).liveQuestions, 1);
+  assert.equal(readFileSync(`${s.log}/answer-1.txt`, 'utf8'), '파랑으로 한다.');
+  const [a] = s.attempts();
+  assert.equal(a.ask.file.replace(/\\/g, '/'), `${s.run}/worktrees/h1/issue-7/.harness/asking.md`);
+  assert.equal(a.ask.prefix, `${s.root}/issues/.drafts/answer-7-h1-q`);
+  assert.equal(a.ask.issue, '7');
+});
+
+test('살아 있는 질문: 답을 기다리는 동안은 출력이 없어도 멈춤으로 죽이지 않는다', T, async () => {
+  const s = setup();
+  s.setPlan('live-ask');
+  const r = await exec(s, ARGS, {
+    stallMs: 1500,
+    onAsk: (info) => { setTimeout(() => writeFileSync(info.answer, '빨강.'), 4000); },
+  });
+  assert.equal(r.code, 0, r.err.join('\n'));
+  assert.equal(JSON.parse(r.out[0]).attempts, 1);
+});
+
+test('Pi 워커는 --no-extensions 그대로 하네스의 pi-ask.js 하나만 -e로 읽는다', T, async () => {
+  const s = setup({ allowed: ['claude', 'gemini'] });
+  const cfgFile = `${s.harnessDir}/operator/operator.config.json`;
+  const cfg = JSON.parse(readFileSync(cfgFile, 'utf8'));
+  cfg.runners.gemini = { ...cfg.runners.gemini, cli: 'pi', command: [process.execPath, s.fake, '--no-extensions'] };
+  writeFileSync(cfgFile, JSON.stringify(cfg));
+  const r = await exec(s, ['--handoff', 'h1', '--issue', '7', '--model', 'gemini'], { available: () => true });
+  assert.equal(r.code, 0, r.err.join('\n'));
+  const [a] = s.attempts();
+  const i = a.argv.indexOf('-e');
+  assert.ok(i > -1, a.argv.join(' '));
+  assert.equal(a.argv.filter((x) => x === '-e').length, 1);
+  assert.equal(a.argv[i + 1].replace(/\\/g, '/'), `${realHarness}/worker/pi-ask.js`);
+  assert.ok(a.argv.includes('--no-extensions'));
 });

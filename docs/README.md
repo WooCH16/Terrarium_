@@ -13,7 +13,7 @@
 | [known-limitations.md](known-limitations.md) | 알려진 한계(보안, 플랫폼, Jev, 앱, 분리 실행, GitHub 흐름) |
 | [adr/README.md](adr/README.md) | 결정 기록(ADR) 색인. 현재 유효한 ADR은 여기서 "채택됨"인 것(0001~0013, workflow) |
 | [checks/owner-decisions.md](checks/owner-decisions.md) | 소유자 결정 목록(번호 8-x, 9-x). ADR과 함께 현재 기준 |
-| [checks/](checks/) | 구현 task의 확인 결과, 실제 실행 기록(`runs.md`), 시나리오 점검표(`T13-scenarios.md`), 앱 작업 기록(`app-screen-replace.md`) |
+| [checks/](checks/) | 구현 task의 확인 결과, 실제 실행 기록(`runs.md`), 시나리오 점검표(`T13-scenarios.md`), 앱 작업 기록(`app-screen-replace.md`), 거부 기록 정리(`denials.md`: 훅·개발 세션·`/goal`) |
 | [releases/](releases/) | 버전별 릴리스 노트. 변경 요약은 루트의 [CHANGELOG](../CHANGELOG.md) |
 | [pi-워커-리뷰어.md](pi-워커-리뷰어.md) | Pi 사용 결정의 근거와 시험 계획 |
 | [../harness/coordinator/AGENT.md](../harness/coordinator/AGENT.md) | 코디네이터 역할 지침 (실행 문서, `setup.mjs`가 실행 폴더의 `CLAUDE.md`로 복사) |

@@ -10,6 +10,8 @@ import { randomBytes } from 'node:crypto';
 import { basename } from 'node:path';
 
 export const WAITING = 8;
+// 분리 실행한 워커가 오퍼레이터의 답을 기다리는 중(결정 8-39). 답 파일을 쓰고 같은 번호를 다시 기다린다.
+export const ASKING = 5;
 export const TOKEN = /^[0-9a-f]{12}$/;
 const DEFAULT_WAIT_MS = 9 * 60 * 1000;
 const MAX_LIFE_MS = 8 * 60 * 60 * 1000;
@@ -62,6 +64,8 @@ export async function waitFor(run, token, { waitMs, pollMs = 1000, now = () => D
   for (;;) {
     const d = readBg(run, token);
     if (d?.done) return { done: true, lines: d.lines ?? [], errLines: d.errLines ?? [], code: d.code };
+    // 워커가 답을 기다리는데 답 파일이 아직 없으면 바로 알린다. 답을 썼으면(확장이 읽어 갈 때까지) 그냥 기다린다.
+    if (d?.asking && typeof d.asking.answer === 'string' && !existsSync(d.asking.answer)) return { asking: d.asking };
     // 전체 기한: 세션 제한(2시간) + 워커 시도를 넘겨도 끝나지 않으면 죽은 것으로 본다(pid 재사용 대비).
     if (d?.startedAt && Date.now() - new Date(d.startedAt).getTime() > MAX_LIFE_MS) return { dead: true };
     const pid = d?.pid ?? launcherPid;
@@ -78,15 +82,22 @@ export async function waitFor(run, token, { waitMs, pollMs = 1000, now = () => D
   }
 }
 
-export function report(r, { token, harnessDir, write, writeErr = (l) => console.error(l) }) {
+export function report(r, { token, harnessDir, run, write, writeErr = (l) => console.error(l) }) {
   if (r.done) { for (const l of r.lines) write(l); for (const l of r.errLines ?? []) writeErr(l); return r.code; }
   if (r.dead) { write(`오류: 분리 실행(대기 번호 ${token})이 결과 없이 끝났습니다. 실행 폴더의 logs/와 handoffs/를 확인하세요.`); return 2; }
+  if (r.asking) {
+    const a = r.asking;
+    const q = /^[A-Za-z]:\/|^\//.test(String(a.question)) ? a.question : `${fwd(run ?? '.')}/${a.question}`;
+    write(`질문 중: 이슈 #${a.issue} 워커가 ${a.kind === '허용 여부' ? '명령 실행 허용 여부를' : '결정을'} 묻고 기다립니다 | 질문 파일: ${q} | 답 파일: ${a.answer} | 답을 쓴 뒤 이어서 기다리기: node ${fwd(harnessDir)}/operator/wait-operator.mjs --wait ${token}`);
+    return ASKING;
+  }
   write(`진행 중: 대기 번호 ${token} | 이어서 기다리기: node ${fwd(harnessDir)}/operator/wait-operator.mjs --wait ${token}`);
   return WAITING;
 }
 
 // 부모 쪽: entry를 --bg-token과 함께 분리 실행하고 기다린다.
-export async function startAndWait({ run, harnessDir, entry, args, env = process.env, write = (l) => console.log(l), spawn = nodeSpawn, record = false }) {
+// waitMs: 기다릴 시간(없으면 HARNESS_BG_WAIT_MS 또는 9분). 0이면 띄우자마자 대기 번호를 낸다(run-worker --detach yes).
+export async function startAndWait({ run, harnessDir, entry, args, env = process.env, write = (l) => console.log(l), spawn = nodeSpawn, record = false, waitMs }) {
   const token = randomBytes(6).toString('hex');
   // Windows에서 detached가 아니면 Node(libuv)가 자식을 작업 객체에 넣어 부모가 끝날 때 같이 죽인다(run-8에서 재현). 그래서 detached로 띄운다.
   // 그런데 detached 프로세스는 콘솔이 없어, 그 아래에서 부르는 git이 가끔 콘솔 닫힘(0xC000013A)으로 죽는다.
@@ -105,7 +116,7 @@ export async function startAndWait({ run, harnessDir, entry, args, env = process
   // "가장 최근 bg 파일"로 찾으면 워커의 번호를 잡는다(run-18 h7, 2026-11-20). Esc 뒤 코디네이터는 이 파일 하나만 읽는다.
   if (record) writeLastWait(run, record, { token, script: basename(entry), args, startedAt });
   launcher.unref?.();
-  return report(await waitFor(run, token, { waitMs: waitMsOf(env), launcherPid: launcher.pid ?? null }), { token, harnessDir, write });
+  return report(await waitFor(run, token, { waitMs: waitMs ?? waitMsOf(env), launcherPid: launcher.pid ?? null }), { token, harnessDir, run, write });
 }
 
 // 발사 프로세스: detached 자식을 띄우고, 기다리는 쪽이 볼 pid를 자식 것으로 바꿔 쓴 뒤 바로 끝난다.
@@ -129,18 +140,34 @@ export async function runDetached({ run, token, entry, argv, env, spawn = nodeSp
   return code ?? 2;
 }
 
+// 워커의 살아 있는 질문을 대기 기록에 남기고 지운다(run-worker의 onAsk·onAnswered). pid·startedAt은 그대로 두고, 끝난 기록은 건드리지 않는다.
+export function askHandlers(run, token) {
+  const patch = (fn) => { const d = readBg(run, token); if (!d || d.done) return; fn(d); writeBg(run, token, d); };
+  return {
+    onAsk: (info) => patch((d) => { d.asking = info; }),
+    onAnswered: () => patch((d) => { delete d.asking; }),
+  };
+}
+
 // 손자 쪽: main을 돌리고 결과를 쓴다. 기다리는 쪽은 detached 자식의 pid로 생사를 본다.
 export async function runChild({ run, token, main, argv, env }) {
   const lines = [];
   const errLines = [];
   let code;
-  try { code = await main(argv, env, { write: (l) => lines.push(l), writeErr: (l) => errLines.push(l) }); } catch (e) { errLines.push(`오류: ${String(e?.message ?? e).slice(0, 300)}`); code = 2; }
+  try { code = await main(argv, env, { write: (l) => lines.push(l), writeErr: (l) => errLines.push(l), ...askHandlers(run, token) }); } catch (e) { errLines.push(`오류: ${String(e?.message ?? e).slice(0, 300)}`); code = 2; }
   writeBg(run, token, { done: true, pid: readBg(run, token)?.pid ?? process.pid, lines, errLines, code, endedAt: new Date().toISOString() });
   return code;
 }
 
-// run-operator·run-research의 명령줄 진입점. --bg-token이 있으면 자식, HARNESS_FOREGROUND=1이면 예전처럼 그 자리에서 돈다.
-export async function cliEntry({ main, entry, argv = process.argv.slice(2), env = process.env, record = false }) {
+// run-operator·run-research·run-worker의 명령줄 진입점. --bg-token이 있으면 자식, HARNESS_FOREGROUND=1이면 예전처럼 그 자리에서 돈다.
+// detachable(run-worker만): `--detach yes`가 있으면 그 두 인자를 빼고, 기다리지 않고 바로 대기 번호(종료 코드 8)를 낸다.
+// 오퍼레이터가 서로 기대지 않는 이슈의 워커를 한꺼번에 띄운 뒤 wait-operator로 하나씩 결과를 받는 데 쓴다.
+export async function cliEntry({ main, entry, argv = process.argv.slice(2), env = process.env, record = false, detachable = false }) {
+  let detach = false;
+  if (detachable && !argv.some((a) => a === '--bg-launch' || a === '--bg-token' || a === '--bg-run')) {
+    const i = argv.indexOf('--detach');
+    if (i !== -1 && argv[i + 1] === 'yes') { detach = true; argv = argv.filter((_, k) => k !== i && k !== i + 1); }
+  }
   const run = fwd(env.HARNESS_RUN_DIR || process.cwd());
   for (const flag of ['--bg-launch', '--bg-token', '--bg-run']) {
     const t = argv.indexOf(flag);
@@ -155,5 +182,5 @@ export async function cliEntry({ main, entry, argv = process.argv.slice(2), env 
   // 실행 폴더가 아니면(harness.json 없음) 분리하지 않는다: main이 바로 오류를 낸다.
   let harnessDir;
   try { harnessDir = fwd(JSON.parse(readFileSync(`${run}/harness.json`, 'utf8')).harnessDir); } catch { return main(argv, env); }
-  return startAndWait({ run, harnessDir, entry, args: argv, env, record });
+  return startAndWait({ run, harnessDir, entry, args: argv, env, record, ...(detach ? { waitMs: 0 } : {}) });
 }

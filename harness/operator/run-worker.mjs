@@ -1,9 +1,13 @@
-// 워커 시작: node run-worker.mjs --handoff h<N> --issue <n> --model <name> [--base main]
+// 워커 시작: node run-worker.mjs --handoff h<N> --issue <n> --model <name> [--base main] [--detach yes]
+// --detach yes: 기다리지 않고 바로 대기 번호를 낸다(서로 기대지 않는 이슈의 워커 동시 실행, background.mjs cliEntry가 처리).
 // 이슈 브랜치 h<N>/issue-<n>의 워크트리를 만들고 러너를 최대 (workerRetries+1)번 실행해 .harness/worker-result.md를 검사한다.
 // stdout에는 한 줄 JSON(시작·종료 main 해시, 시도 횟수, model(실제로 띄운 모델 타입), replacedFrom·replacedReason(대체됐을 때), 워크트리 이름)만, 오류는 stderr에 `오류:` 한 줄.
 // 지정 모델을 쓸 수 없으면(허용 목록 밖, CLI 없음) operator.config.json의 fallback을 순환한다. publicOnly 모델(muse)은 이슈 본문에 `공개 가능: 예`가 있을 때만 대체로 쓴다.
 // 그 때문에 쓸 모델이 남지 않으면 status 막힘(종료 코드 1), 아예 쓸 모델이 없으면 종료 코드 2다. 러너를 띄우지 못한 경우(실행 실패)는 대체하지 않고 종료 코드 2다.
-// 종료 코드: 0 성공, 1 막힘(모든 시도 실패), 2 설정·인자·모델·저장소 실패, 3 중단(stop-operator의 표시).
+// 종료 코드: 0 성공, 1 막힘(모든 시도 실패), 2 설정·인자·모델·저장소 실패, 3 중단(stop-operator의 표시), 4 결정 필요(워커가 묻고 멈춤).
+// 워커는 이슈가 정하지 않은 갈림길에서 고르지 않고 .harness/worker-question.md를 쓰고 멈춘다(결정 8-38). 그러면 status 결정필요와 질문 파일 경로만 낸다(본문은 내지 않는다).
+// 오퍼레이터가 <지정 저장소 클론>/.drafts/answer-<n>-h<N>.md에 결정을 쓰고 --answer yes로 다시 부르면 같은 워크트리·브랜치에서 이어 한다.
+// 이어 하기는 질문 기록(handoffs/h<N>/question-<n>.json, 오퍼레이터가 쓰지 못하는 곳)이 있을 때만 된다. 같은 하달 재작업 통로가 아니다. 질문은 이슈마다 MAX_QUESTIONS번까지.
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, lstatSync, statSync, realpathSync, renameSync, rmSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { delimiter, resolve as resolvePath, isAbsolute } from 'node:path';
@@ -26,6 +30,25 @@ const MAX_PIDS = 64;
 const MAX_RESULT_BYTES = 64 * 1024;
 const MAX_BODY_BYTES = 200 * 1024;
 const TOOLS = 'Bash Write Edit Read Glob Grep';
+export const QUESTION_EXIT = 4;
+// Pi 워커 확장(결정 8-39): 워커가 묻고 기다리는 도구 ask_operator와, 이슈에 없는 결정으로 보이는 명령을 실행 전에 허용 여부로 묻는 훅.
+// Pi는 --no-extensions 그대로 이 파일 하나만 -e로 읽는다. 질문은 워크트리의 .harness/asking.md, 답은 오퍼레이터가 .drafts/answer-<n>-h<N>-q<번호>.md에 쓴다.
+export const PI_ASK_EXT = fwd(fileURLToPath(new URL('../worker/pi-ask.js', import.meta.url)));
+const ASKING_REL = '.harness/asking.md';
+// 확장이 쓴 질문 파일의 번호와 종류. 없거나 모양이 틀리면 null.
+function readAsking(file) {
+  let t;
+  try { t = readFileSync(file, 'utf8'); } catch { return null; }
+  const id = /## 질문 번호\r?\n(\d{1,10}-\d{1,4})\s*(?:\r?\n|$)/.exec(t)?.[1];
+  const kind = /## 종류\r?\n(질문|허용 여부)\s*(?:\r?\n|$)/.exec(t)?.[1];
+  return id && kind ? { id, kind } : null;
+}
+export const MAX_QUESTIONS = 2;
+const MAX_QUESTION_BYTES = 16 * 1024;
+const MAX_ANSWER_BYTES = 16 * 1024;
+const QUESTION_REL = '.harness/worker-question.md';
+export const questionRecordFile = (run, handoff, issue) => `${run}/handoffs/${handoff}/question-${issue}.json`;
+export const answerFile = (issuesClone, handoff, issue) => `${fwd(issuesClone)}/.drafts/answer-${issue}-${handoff}.md`;
 
 // 워크트리에서 커밋·병합되면 안 되는 이름(프로젝트 설정·지침 파일)과 워커 입출력 폴더.
 const EXCLUDE = ['.claude', 'CLAUDE.md', 'AGENTS.md', 'CLAUDE.local.md', '.mcp.json', '.harness/'];
@@ -46,7 +69,7 @@ function parseArgs(argv) {
   const seen = {};
   for (let i = 0; i < argv.length; i += 2) {
     const flag = argv[i];
-    if (!['--handoff', '--issue', '--model', '--base'].includes(flag)) throw new UsageError(`알 수 없는 인자입니다: ${JSON.stringify(String(flag)).slice(0, 40)}. 사용법: --handoff h<N> --issue <n> --model <name> [--base <브랜치>]`);
+    if (!['--handoff', '--issue', '--model', '--base', '--answer'].includes(flag)) throw new UsageError(`알 수 없는 인자입니다: ${JSON.stringify(String(flag)).slice(0, 40)}. 사용법: --handoff h<N> --issue <n> --model <name> [--base <브랜치> | --answer yes]`);
     if (flag in seen) throw new UsageError(`인자 ${flag}가 두 번 이상 있습니다.`);
     if (argv[i + 1] === undefined) throw new UsageError(`인자 ${flag}에 값이 필요합니다.`);
     seen[flag] = argv[i + 1];
@@ -59,7 +82,36 @@ function parseArgs(argv) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/.test(base) || base.includes('..') || base.includes('//') || /[/.]$/.test(base) || /\.lock(\/|$)/.test(base)) {
     throw new UsageError('--base는 안전한 브랜치 이름이어야 합니다(앞에 -, .., 공백·제어 문자, 끝의 / . .lock 불가).');
   }
-  return { handoff: seen['--handoff'], issue: Number(seen['--issue']), model: seen['--model'], base };
+  if ('--answer' in seen && seen['--answer'] !== 'yes') throw new UsageError('--answer는 yes만 받습니다.');
+  const answer = seen['--answer'] === 'yes';
+  // 이어 하기의 시작점은 질문 기록에 있다. 다른 시작점을 주면 섞이므로 받지 않는다.
+  if (answer && '--base' in seen) throw new UsageError('--answer yes는 --base와 함께 쓰지 않습니다(시작점은 질문 기록을 따릅니다).');
+  return { handoff: seen['--handoff'], issue: Number(seen['--issue']), model: seen['--model'], base, answer };
+}
+
+// 질문 기록(이어 하기의 근거). 없거나 깨졌으면 null.
+function readQuestionRecord(file, issue) {
+  try {
+    const r = JSON.parse(readFileSync(file, 'utf8'));
+    return r && r.issue === issue && typeof r.requestedModel === 'string' && typeof r.base === 'string' && /^[0-9a-f]{40}$/.test(r.baseCommit ?? '') && Number.isSafeInteger(r.rounds) ? r : null;
+  } catch { return null; }
+}
+// 워커의 질문 파일. 없으면 null, 모양이 틀리면 { reason }, 맞으면 { text }(질문 칸).
+function readQuestion(worktree, issue) {
+  const file = `${worktree}/${QUESTION_REL}`;
+  let st;
+  try { st = lstatSync(file); } catch { return null; }
+  if (!st.isFile() || st.size > MAX_QUESTION_BYTES) return { reason: '질문 파일(.harness/worker-question.md)이 일반 파일이 아니거나 너무 큽니다.' };
+  const sections = {};
+  let name = null;
+  for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
+    const m = /^##\s+(.+?)\s*$/.exec(line);
+    if (m) { name = m[1]; sections[name] = ''; } else if (name !== null) sections[name] += `${line}\n`;
+  }
+  if ((sections['이슈 번호'] ?? '').trim().replace(/^#/, '') !== String(issue)) return { reason: `질문 파일의 이슈 번호가 이 이슈(${issue})와 다릅니다.` };
+  const text = (sections['질문'] ?? '').trim();
+  if (!text) return { reason: '질문 파일에 ## 질문 칸이 없거나 비어 있습니다.' };
+  return { text };
 }
 
 // 러너가 쓸 비밀값(runners.<m>.secretEnv, 이슈 #26). 하나라도 없으면 null. 값은 러너의 환경 변수로만 넘기고 기록하지 않는다.
@@ -216,7 +268,7 @@ export const WORKER_DOC = new URL('../worker/AGENT.md', import.meta.url);
 export const WORKER_SKILL = new URL('../worker/skills/worker-issue/SKILL.md', import.meta.url);
 const dropFrontmatter = (t) => t.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n(?:\r?\n)?/, '');
 export const workerDoc = () => `${readFileSync(WORKER_DOC, 'utf8').trimEnd()}\n\n${dropFrontmatter(readFileSync(WORKER_SKILL, 'utf8')).trimEnd()}`;
-export function inputText({ issue, worktree, body, failures }, doc = workerDoc()) {
+export function inputText({ issue, worktree, body, failures, decisions = [] }, doc = workerDoc()) {
   const parts = [
     doc.trimEnd(),
     '',
@@ -231,6 +283,7 @@ export function inputText({ issue, worktree, body, failures }, doc = workerDoc()
     '## 이슈 본문',
     body,
   ];
+  for (const d of decisions) parts.push('', '## 앞서 한 질문', d.question, '', '## 오퍼레이터 결정', d.answer);
   if (failures.length) parts.push('', '## 이전 실패 이유', ...failures.map((f) => `- ${f}`));
   parts.push('');
   return parts.join('\n');
@@ -273,7 +326,7 @@ function checkResult({ worktree, issue, baseCommit, branchRef, git }) {
 }
 
 // ---- 러너 실행 ----
-function runRunner({ bin, args, cwd, env, prompt, timeoutMs, stallMs = 0, spawn, kill, onPid, observer }) {
+function runRunner({ bin, args, cwd, env, prompt, timeoutMs, stallMs = 0, spawn, kill, onPid, observer, paused = () => false }) {
   return new Promise((done) => {
     let finished = false;
     let timedOut = false;
@@ -286,7 +339,11 @@ function runRunner({ bin, args, cwd, env, prompt, timeoutMs, stallMs = 0, spawn,
     const armIdle = () => {
       if (!(stallMs > 0) || finished) return;
       clearTimeout(idle);
-      idle = setTimeout(() => { stalled = true; killChild(); setTimeout(() => finish({ code: 1, stalled: true }), 2000).unref(); }, stallMs);
+      idle = setTimeout(() => {
+        // 워커가 오퍼레이터의 답을 기다리는 중이면(질문 파일이 있음) 출력이 없는 것이 정상이다: 다시 잰다(결정 8-39).
+        if (paused()) { armIdle(); return; }
+        stalled = true; killChild(); setTimeout(() => finish({ code: 1, stalled: true }), 2000).unref();
+      }, stallMs);
     };
     const killChild = () => {
       if (process.platform === 'win32' && child.pid) { try { kill(child.pid); } catch { /* 이미 끝남 */ } }
@@ -330,7 +387,8 @@ export async function main(argv, env = process.env, deps = {}) {
   const git = deps.git ?? ((cwd, args, genv) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: genv ?? process.env }));
   let undo = null; // 이번 호출이 만든 워크트리·브랜치를 지우는 함수(실패 때 쓴다)
   try {
-    const { handoff, issue, model: requested, base } = parseArgs(argv);
+    const { handoff, issue, model: requested, base: baseArg, answer: resume } = parseArgs(argv);
+    let base = baseArg;
     const run = fwd(resolvePath(env.HARNESS_RUN_DIR || process.cwd()));
     const configFile = `${run}/harness.json`;
     if (!existsSync(configFile)) return fail(`실행 폴더에 harness.json이 없습니다: ${run}`);
@@ -348,8 +406,28 @@ export async function main(argv, env = process.env, deps = {}) {
     const mainHash = () => git(memo, ['rev-parse', '--verify', 'refs/heads/main']).trim();
     let mainBefore;
     try { mainBefore = mainHash(); } catch { return fail(`대상 프로젝트의 main 브랜치를 읽을 수 없습니다: ${memo}`); }
+    // 이어 하기(--answer yes): 질문 기록과 오퍼레이터의 답이 있어야 한다. 시작점·모델은 질문 기록을 따른다.
+    const recordFile = questionRecordFile(run, handoff, issue);
+    let record = null;
+    // 앞선 질문과 오퍼레이터 결정 쌍(차례대로). 워커는 매번 새 맥락이라 앞 결정을 모두 다시 넘긴다.
+    let decisions = [];
+    const aFile = answerFile(config.issuesClone, handoff, issue);
+    if (resume) {
+      record = readQuestionRecord(recordFile, issue);
+      if (!record) return fail(`이슈 #${issue}의 질문 기록이 없습니다. --answer yes는 워커가 물은 이슈(종료 코드 ${QUESTION_EXIT})에만 씁니다.`);
+      if (record.requestedModel !== requested) return fail(`이어 하기는 처음 부른 모델(${record.requestedModel})로 부릅니다. --model ${record.requestedModel}`);
+      let ast;
+      try { ast = lstatSync(aFile); } catch { return fail(`오퍼레이터 결정 파일이 없습니다: ${aFile}`); }
+      if (!ast.isFile() || ast.size > MAX_ANSWER_BYTES) return fail(`오퍼레이터 결정 파일이 일반 파일이 아니거나 너무 큽니다: ${aFile}`);
+      const text = readFileSync(aFile, 'utf8').trim();
+      if (!text) return fail(`오퍼레이터 결정 파일이 비어 있습니다: ${aFile}`);
+      const earlier = Array.isArray(record.decisions) ? record.decisions.filter((d) => typeof d?.question === 'string' && typeof d?.answer === 'string') : [];
+      decisions = [...earlier, { question: record.question ?? '(기록 없음)', answer: text }];
+      base = record.base;
+    }
     let baseCommit;
-    try { baseCommit = git(memo, ['rev-parse', '--verify', `${base}^{commit}`]).trim(); } catch { return fail(`기준 브랜치 ${base}를 찾을 수 없습니다.`); }
+    if (record) baseCommit = record.baseCommit;
+    else { try { baseCommit = git(memo, ['rev-parse', '--verify', `${base}^{commit}`]).trim(); } catch { return fail(`기준 브랜치 ${base}를 찾을 수 없습니다.`); } }
 
     // 이슈 본문은 신뢰하지 않는 데이터다: 파일로만 쓰고 명령줄·설정에 넣지 않는다.
     const fetchBody = deps.fetchIssueBody ?? (async (n) => JSON.parse(defaultExec(env)('gh', ['issue', 'view', String(n), '--repo', config.designatedRepo, '--json', 'body'])).body);
@@ -377,6 +455,14 @@ export async function main(argv, env = process.env, deps = {}) {
     const logFile = `${harnessFolder}/runner.log`;
     const difficulty = difficultyOf(body); // 이슈 본문의 `난이도:`(라우팅이 정함). 러너가 tiers를 두면 그 모델로 띄운다
     const excludeFile = `${run}/handoffs/${handoff}/worker-${issue}.exclude`;
+    const askFile = `${harnessFolder}/${ASKING_REL.slice('.harness/'.length)}`;
+    const answerPrefix = `${fwd(config.issuesClone)}/.drafts/answer-${issue}-${handoff}-q`;
+    const askEnv = {
+      HARNESS_ASK_FILE: askFile, HARNESS_ANSWER_PREFIX: answerPrefix, HARNESS_WORKER_ISSUE: String(issue),
+      ...(/^\d+$/.test(env.HARNESS_ASK_WAIT_MS ?? '') ? { HARNESS_ASK_WAIT_MS: env.HARNESS_ASK_WAIT_MS } : {}),
+    };
+    let liveAsked = 0;
+    try { mkdirSync(`${fwd(config.issuesClone)}/.drafts`, { recursive: true }); } catch { /* 클론이 없으면 답을 받지 못하고 확장이 질문 파일 경로로 넘어간다 */ }
     // 모델 하나의 실행 준비. 러너가 멈추면(출력 없음) 대체 모델로 다시 준비한다.
     const prepare = (ch) => {
       const { model } = ch;
@@ -396,6 +482,8 @@ export async function main(argv, env = process.env, deps = {}) {
         if (l) { bin = l.bin; args = [...l.args, ...args]; }
       }
       const childEnv = withExcludeEnv(workerEnv({ ...process.env, ...env }), excludeFile);
+      // 묻기 통로(pi-ask.js가 읽는다). workerEnv는 HARNESS_*를 넘기지 않으므로 여기서 정해 준다.
+      Object.assign(childEnv, askEnv);
       const secrets = secretsFor(cfg, model, { env, run, harnessDir });
       if (secrets === null) throw new ConfigError(`${model}에 필요한 비밀값(${(runnerCfg.secretEnv ?? []).join(', ')})이 없습니다. 환경 변수나 실행 폴더의 .env에 넣으세요.`);
       Object.assign(childEnv, secrets);
@@ -414,6 +502,7 @@ export async function main(argv, env = process.env, deps = {}) {
         Object.assign(childEnv, settings.env);
       } else {
         args.push(...sandbox(worktree));
+        if (cli === 'pi') args.push('-e', PI_ASK_EXT);
         // agy는 프롬프트를 --print 인자로만 받는다(표준 입력은 읽지 않는다).
         if (cli === 'agy') args.push('--print', `${promptFile} 파일을 읽고 그 지시대로 작업하세요.`);
         Object.assign(childEnv, { GIT_AUTHOR_NAME: 'terrarium-worker', GIT_AUTHOR_EMAIL: 'worker@localhost', GIT_COMMITTER_NAME: 'terrarium-worker', GIT_COMMITTER_EMAIL: 'worker@localhost' });
@@ -425,17 +514,24 @@ export async function main(argv, env = process.env, deps = {}) {
     writeExcludeFile(excludeFile, userIgnoreText(git, memo, { ...process.env, ...env }));
     const gitW = (cwd, args) => git(cwd, args, P.childEnv);
 
-    if (git(memo, ['branch', '--list', names.issueBranch]).trim()) return fail(`브랜치 ${names.issueBranch}가 이미 있습니다.`);
-    ensureWorktreeParents(run, handoff);
-    try { lstatSync(worktree); return fail(`워크트리가 이미 있습니다: ${worktree}`); } catch (e) { if (e.code !== 'ENOENT') throw e; }
-    if (isStopped(run, handoff)) return stopped;
-    git(memo, ['worktree', 'add', '-b', names.issueBranch, '--', worktree, baseCommit]);
-    undo = () => {
-      try { git(memo, ['worktree', 'remove', '--force', worktree]); } catch { /* 아래에서 폴더를 직접 지운다 */ }
-      try { assertPlain(worktree, `${realpathSync.native(run)}/worktrees/${handoff}/issue-${issue}`, 'worktree'); rmSync(worktree, { recursive: true, force: true }); } catch { /* 링크면 건드리지 않는다 */ }
-      try { git(memo, ['worktree', 'prune']); } catch { /* 무시 */ }
-      git(memo, ['branch', '-D', names.issueBranch]);
-    };
+    if (resume) {
+      // 이어 하기: 질문 때 남긴 워크트리·브랜치를 그대로 쓴다. 실패해도 지우지 않는다(undo 없음).
+      if (!git(memo, ['branch', '--list', names.issueBranch]).trim()) return fail(`이어 할 브랜치 ${names.issueBranch}가 없습니다.`);
+      try { if (!lstatSync(worktree).isDirectory()) return fail(`이어 할 워크트리가 폴더가 아닙니다: ${worktree}`); } catch { return fail(`이어 할 워크트리가 없습니다: ${worktree}`); }
+      if (isStopped(run, handoff)) return stopped;
+    } else {
+      if (git(memo, ['branch', '--list', names.issueBranch]).trim()) return fail(`브랜치 ${names.issueBranch}가 이미 있습니다.`);
+      ensureWorktreeParents(run, handoff);
+      try { lstatSync(worktree); return fail(`워크트리가 이미 있습니다: ${worktree}`); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+      if (isStopped(run, handoff)) return stopped;
+      git(memo, ['worktree', 'add', '-b', names.issueBranch, '--', worktree, baseCommit]);
+      undo = () => {
+        try { git(memo, ['worktree', 'remove', '--force', worktree]); } catch { /* 아래에서 폴더를 직접 지운다 */ }
+        try { assertPlain(worktree, `${realpathSync.native(run)}/worktrees/${handoff}/issue-${issue}`, 'worktree'); rmSync(worktree, { recursive: true, force: true }); } catch { /* 링크면 건드리지 않는다 */ }
+        try { git(memo, ['worktree', 'prune']); } catch { /* 무시 */ }
+        git(memo, ['branch', '-D', names.issueBranch]);
+      };
+    }
     assertPlain(worktree, `${realpathSync.native(run)}/worktrees/${handoff}/issue-${issue}`, `worktrees/${handoff}/issue-${issue}`);
     verifyExcludes(gitW, worktree);
     mkdirSync(harnessFolder, { recursive: true });
@@ -453,7 +549,7 @@ export async function main(argv, env = process.env, deps = {}) {
       modelId: P.chosenModelId ?? P.runnerCfg.modelId ?? null, ...(P.runnerCfg.tiers ? { difficulty: difficulty ?? '모름(기본 모델)' } : {}), via: P.runnerCfg.via ?? 'direct', cli: P.cli,
       ...(P.runnerCfg.temporary ? { temporary: P.runnerCfg.temporary } : {}),
       isolation: ISOLATION[P.cli] ?? null,
-      worktree: `worktrees/${handoff}/issue-${issue}`, ...extra,
+      worktree: `worktrees/${handoff}/issue-${issue}`, liveQuestions: liveAsked, ...extra,
     });
     const snapshot = () => protectedSnapshot({ run, harnessDir, memo, git });
     const guardBefore = snapshot();
@@ -463,17 +559,33 @@ export async function main(argv, env = process.env, deps = {}) {
     // 러너를 띄우기 직전에 start 한 줄. base·baseCommit은 반영 순서 검사(결정 8-31)가 쓴다.
     logWorker(run, handoff, { event: 'start', issue, requestedModel: requested, model: P.model, base, baseCommit }, now);
     logEnd = (extra) => logWorker(run, handoff, { event: 'end', issue, attempts, model: P.model, ...extra }, now);
-    while (attempts < attemptsMax && !ok && breach === null) {
+    let asked = null; // 워커가 물었으면 { text }. 질문은 실패가 아니다: 시도를 더 쓰지 않고 멈춘다.
+    while (attempts < attemptsMax && !ok && breach === null && asked === null) {
       if (isStopped(run, handoff)) return stopped;
       attempts++;
       rmSync(resultFile, { force: true });
-      writeFileSync(promptFile, inputText({ issue, worktree, body, failures }));
+      rmSync(`${worktree}/${QUESTION_REL}`, { force: true }); // 앞 시도·앞 질문의 파일은 이번 시도의 질문이 아니다
+      rmSync(askFile, { force: true });
+      writeFileSync(promptFile, inputText({ issue, worktree, body, failures, decisions }));
       let pid;
       let onSignal = null;
       let r;
       const observer = createObserver(P.cli);
+      // 살아 있는 질문(결정 8-39): 확장이 질문 파일을 쓰면 오퍼레이터에게 알리고(onAsk, 분리 실행이면 대기 기록에 남는다), 지워지면 끝을 알린다.
+      let announced = null;
+      const notify = (fn, arg) => { try { fn?.(arg); } catch { /* 알림 실패는 워커를 막지 않는다 */ } };
+      const watchAsk = () => {
+        const a = readAsking(askFile);
+        if (a && a.id !== announced) {
+          announced = a.id;
+          liveAsked++;
+          notify(deps.onAsk, { id: a.id, kind: a.kind, issue, question: `worktrees/${handoff}/issue-${issue}/${ASKING_REL}`, answer: `${answerPrefix}${a.id}.md` });
+        } else if (!a && announced !== null) { announced = null; notify(deps.onAnswered); }
+      };
+      const watcher = setInterval(watchAsk, deps.askPollMs ?? 500);
       try {
         r = await runRunner({
+          paused: () => existsSync(askFile),
           bin: P.bin, args: P.args, cwd: worktree, env: P.childEnv, prompt: P.prompt, spawn, observer, kill: deps.killTree ?? killTree,
           timeoutMs: deps.timeoutMs ?? DEFAULT_TIMEOUT_MS, stallMs: deps.stallMs ?? DEFAULT_STALL_MS,
           onPid: (p, killChild) => {
@@ -489,6 +601,9 @@ export async function main(argv, env = process.env, deps = {}) {
           },
         });
       } finally {
+        clearInterval(watcher);
+        rmSync(askFile, { force: true });
+        if (announced !== null) notify(deps.onAnswered); // 러너가 답을 받기 전에 끝났다: 대기 기록의 질문을 지운다
         if (onSignal) { process.removeListener('SIGINT', onSignal); process.removeListener('SIGTERM', onSignal); }
         if (pid !== undefined) releasePid(sessionFile, pid, now);
       }
@@ -508,10 +623,17 @@ export async function main(argv, env = process.env, deps = {}) {
       else if (o.model !== null && !modelMatches(P.model, o.model)) reason = `실제 모델(${ONE_LINE(o.model)})이 지정한 모델(${P.model})과 다릅니다.`;
       else if (r.timedOut) reason = '시간 초과로 러너를 종료했습니다.';
       else if (r.code !== 0) reason = `러너가 종료 코드 ${r.code}로 끝났습니다.`;
-      else reason = checkResult({ worktree, issue, baseCommit, branchRef: `refs/heads/${names.issueBranch}`, git: (cwd, a) => git(cwd, a, { ...P.childEnv, GIT_NO_REPLACE_OBJECTS: '1' }) });
+      else {
+        // 질문 파일이 있으면 결과 파일보다 먼저 본다(둘 다 있으면 질문이 이긴다: 고른 결과를 받아들이지 않는다).
+        const q = readQuestion(worktree, issue);
+        if (q?.text) asked = q;
+        else if (q) reason = q.reason;
+        else reason = checkResult({ worktree, issue, baseCommit, branchRef: `refs/heads/${names.issueBranch}`, git: (cwd, a) => git(cwd, a, { ...P.childEnv, GIT_NO_REPLACE_OBJECTS: '1' }) });
+      }
       // 러너가 제공사 오류를 내고 끝났으면(예: Google 503을 다시 시도하다 포기, run-8) 그 오류를 이유에 붙인다.
       const providerError = reason !== null && !r.stalled && o.error ? ONE_LINE(o.error).slice(0, 160) : null;
       if (providerError) reason = `${reason} 제공사 오류: ${providerError}`;
+      if (asked) break;
       if (reason === null) ok = true;
       else failures.push(ONE_LINE(`시도 ${attempts} 실패: ${reason}`));
       // 멈추거나 제공사 오류로 실패한 모델은 이번 호출에서 다시 쓰지 않고 대체 표의 다음 모델로 넘긴다. 남은 모델이 없으면 같은 모델로 다시 시도한다.
@@ -525,6 +647,21 @@ export async function main(argv, env = process.env, deps = {}) {
     }
     let mainAfter = null;
     try { mainAfter = mainHash(); } catch { /* 기록하지 못한 값은 null */ }
+    // 쓴 답은 지운다: 다음 질문에 옛 답이 그대로 쓰이지 않게(결정은 질문 기록의 decisions에 남는다).
+    if (resume) rmSync(aFile, { force: true });
+    if (asked) {
+      const round = (record?.rounds ?? 0) + 1;
+      if (round <= MAX_QUESTIONS) {
+        // 질문 기록은 handoffs/ 아래(오퍼레이터·코디네이터가 쓰지 못하는 곳)에 둔다. 질문 본문은 출력하지 않고 경로만 낸다.
+        writeFileSync(recordFile, JSON.stringify({ issue, requestedModel: requested, base, baseCommit, rounds: round, question: asked.text.slice(0, MAX_QUESTION_BYTES), decisions, at: now().toISOString() }, null, 2));
+        write(JSON.stringify(result({ status: '결정필요', attempts, failures, question: `worktrees/${handoff}/issue-${issue}/${QUESTION_REL}`, round, mainBefore, mainAfter, commit: null, actualModel: observed.model })));
+        logEnd({ status: '결정필요', actualModel: observed.model });
+        logEnd = null;
+        return QUESTION_EXIT;
+      }
+      failures.push(ONE_LINE(`시도 ${attempts}: 질문 한도(${MAX_QUESTIONS}번)를 넘어 더 묻지 않습니다. 이슈의 목표·기준을 고쳐 새 하달로 다시 시켜야 합니다.`));
+    }
+    rmSync(recordFile, { force: true }); // 끝났거나 막혔으면 이어 할 질문이 없다
     let commit = null;
     if (ok) { try { commit = git(memo, ['rev-parse', '--verify', `refs/heads/${names.issueBranch}`]).trim(); } catch { /* 기록하지 못한 값은 null */ } }
     write(JSON.stringify(result({ status: ok ? '완료' : '막힘', attempts, failures, mainBefore, mainAfter, commit, actualModel: observed.model, modelTrace: observed.trace, ...(breach ? { outsideChanges: breach } : {}), ...(targetChanged ? { targetProjectChanged: true } : {}) })));
@@ -594,5 +731,5 @@ export function protectedChanges(before, after) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   // 분리 실행(background.mjs): 오퍼레이터의 Bash 호출은 10분에서 끊기거나 백그라운드로 넘어간다. 9분 안에 안 끝나면 종료 코드 8과 대기 번호.
   const { cliEntry } = await import('./background.mjs');
-  process.exitCode = await cliEntry({ main, entry: fileURLToPath(import.meta.url) });
+  process.exitCode = await cliEntry({ main, entry: fileURLToPath(import.meta.url), detachable: true });
 }

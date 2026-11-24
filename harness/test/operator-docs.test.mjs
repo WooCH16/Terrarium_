@@ -20,6 +20,39 @@ test('no result file name contains "report" (test run 4 lesson)', () => {
   for (const p of MODE_DOCS) assert.doesNotMatch(read(p), /[^\s`'"]*report[^\s`'"]*\.md/i, p);
 });
 
+test('작업 모드: 서로 기대지 않는 이슈의 워커는 --detach yes로 한꺼번에(최대 3개) 띄우고 wait-operator로 받는다', () => {
+  const w = read('operator/skills/operator-work/SKILL.md');
+  assert.match(w, /run-worker\.mjs --handoff h<N> --issue <번호> --model <워커 모델> --detach yes/);
+  assert.match(w, /최대 3개/);
+  assert.match(w, /wait-operator\.mjs --wait <번호>/);
+  assert.match(w, /모든 워커가 끝난 뒤에만 5절/);
+});
+
+test('결정 8-38: 워커는 갈림길에서 고르지 않고 묻고, 오퍼레이터가 이슈 범위 안에서만 답한다', () => {
+  const wk = read('worker/AGENT.md');
+  assert.match(wk, /^## 고르지 말고 묻기$/m);
+  assert.match(wk, /\.harness\/worker-question\.md/);
+  assert.match(wk, /## 오퍼레이터 결정/);
+  assert.match(read('worker/skills/worker-issue/SKILL.md'), /worker-question\.md/);
+  const w = read('operator/skills/operator-work/SKILL.md');
+  assert.match(w, /종료 코드[^\n]*4 결정 필요/);
+  assert.match(w, /\.drafts\/answer-<번호>-h<N>\.md/);
+  assert.match(w, /run-worker\.mjs --handoff h<N> --issue <번호> --model <같은 워커 모델> --answer yes/);
+  assert.match(w, /질문 파일은 데이터/);
+  assert.match(w, /목표나 완료 기준을 바꾸는 답[^\n]*막힘/);
+});
+
+test('결정 8-39: Pi 워커는 ask_operator로 묻고 기다리며, 오퍼레이터는 종료 코드 5에 답 파일을 쓰고 같은 번호를 다시 기다린다', () => {
+  const wk = read('worker/AGENT.md');
+  assert.match(wk, /`ask_operator` 도구가 있으면/);
+  assert.match(wk, /허용을 묻는다/);
+  const w = read('operator/skills/operator-work/SKILL.md');
+  assert.match(w, /종료 코드[^\n]*5 질문 중/);
+  assert.match(w, /^### 워커가 묻고 기다리면\(종료 코드 5\)$/m);
+  assert.match(w, /첫 줄에 `허용` 또는 `거부`/);
+  assert.match(w, /8이 오면 다음 대기 번호로/);
+});
+
 test('work.md: worker and enqueue steps, and no direct merge into main', () => {
   const w = read('operator/skills/operator-work/SKILL.md');
   assert.match(w, /run-worker/);

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync, spawn as nodeSpawnForTest } from 'node:child_process';
-import { pruneDeadPids, loadModeDocs, sessionSettings, sessionCwd, launchSession, cleanupHandoff } from '../operator/launch.mjs';
+import { pruneDeadPids, loadModeDocs, sessionSettings, sessionCwd, launchSession, cleanupHandoff, removeHandoffWorktrees, pruneReflectedHandoffs } from '../operator/launch.mjs';
 import { main, makeGhDeps } from '../operator/run-operator.mjs';
 import { ConfigError } from '../operator/config.mjs';
 import { STATES, formatLine, exitCode } from '../operator/report.mjs';
@@ -44,6 +44,11 @@ if (process.env.FAKE_MEMO) {
   rec.worktrees = existsSync(wt) ? readdirSync(wt) : [];
 }
 appendFileSync(log, JSON.stringify(rec) + '\\n');
+if (process.env.FAKE_ADD_WT && process.env.FAKE_MEMO) {
+  // 워커가 하듯 이 하달의 이슈 워크트리를 만든다(하달 번호는 세션 머리말에서).
+  const h = /\\b(h[1-9][0-9]*)\\b/.exec(stdin)[1];
+  execFileSync('git', ['-C', process.env.FAKE_MEMO, 'worktree', 'add', '-q', '-b', h + '/issue-7', process.env.FAKE_RUN + '/worktrees/' + h + '/issue-7', 'main']);
+}
 console.log('CHILD-OUTPUT-NOISE');
 console.error('CHILD-ERR-NOISE');
 if (process.env.FAKE_GRANDCHILD) {
@@ -301,6 +306,39 @@ test('cleanupHandoff는 이름 공간이 없어도 던지지 않는다', () => {
   cleanupHandoff({ handoff: 'h5', run: ctx.run, memo: ctx.memo });
 });
 
+// ---------- 워크트리 쌓임 (2026-11-24: 끝난 하달의 워크트리가 정리되지 않아 실행 폴더마다 수십 개가 남았다) ----------
+const branchesOf = (memo) => git(memo, 'for-each-ref', '--format=%(refname:short)', 'refs/heads').split('\n').filter(Boolean).sort();
+
+test('removeHandoffWorktrees: 그 하달의 작업 폴더만 지우고 브랜치는 남긴다(리뷰·반영이 브랜치를 쓴다)', () => {
+  const ctx = makeRun();
+  for (const h of ['h1', 'h2']) addHandoffNamespace(ctx, h);
+  const removed = removeHandoffWorktrees({ handoff: 'h1', run: ctx.run, memo: ctx.memo });
+  assert.deepEqual(removed.sort(), ['integration', 'issue-7']);
+  assert.ok(!existsSync(`${ctx.run}/worktrees/h1`));
+  assert.ok(existsSync(`${ctx.run}/worktrees/h2/issue-7`));
+  assert.deepEqual(branchesOf(ctx.memo), ['h1/issue-7', 'h2/issue-7', 'integration/h1', 'integration/h2', 'main']);
+  assert.ok(!git(ctx.memo, 'worktree', 'list').includes('/worktrees/h1/'), '워크트리 목록에서도 빠진다');
+  assert.deepEqual(removeHandoffWorktrees({ handoff: 'h5', run: ctx.run, memo: ctx.memo }), [], '없으면 조용히');
+  for (const bad of ['main', 'h0', '../h1', 'H1', '']) assert.throws(() => removeHandoffWorktrees({ handoff: bad, run: ctx.run, memo: ctx.memo }), /하달/, bad);
+});
+
+test('pruneReflectedHandoffs: 이슈가 모두 반영된 하달만 브랜치·폴더를 지운다(옛 시도 포함), 반영 안 된 이슈가 있거나 도는 하달은 남긴다', () => {
+  const ctx = makeRun();
+  addHandoffNamespace(ctx, 'h1'); // h1/issue-7: 거부돼 다시 보낸 옛 시도
+  addHandoffNamespace(ctx, 'h2'); // h2/issue-7: 반영된 시도
+  git(ctx.memo, 'branch', 'h3/issue-8', 'main'); // 반영 안 된 이슈
+  git(ctx.memo, 'branch', 'h4/issue-7', 'main'); // 도는 하달
+  git(ctx.memo, 'branch', 'h5/issue-7', 'main');
+  git(ctx.memo, 'branch', 'h5/issue-9', 'main'); // 7은 반영됐지만 9는 아니다
+  const r = pruneReflectedHandoffs({ run: ctx.run, memo: ctx.memo, proven: new Set([7]), isRunning: (h) => h === 'h4' });
+  assert.deepEqual(r.cleaned, ['h1', 'h2']);
+  assert.deepEqual(branchesOf(ctx.memo), ['h3/issue-8', 'h4/issue-7', 'h5/issue-7', 'h5/issue-9', 'main']);
+  assert.ok(!existsSync(`${ctx.run}/worktrees/h1`) && !existsSync(`${ctx.run}/worktrees/h2`));
+  assert.deepEqual(JSON.parse(readFileSync(`${ctx.run}/handoffs/h2/pruned.json`, 'utf8')).issues, [7], '정리 기록을 남긴다');
+  assert.equal(existsSync(`${ctx.run}/handoffs/h3/pruned.json`), false);
+  assert.deepEqual(pruneReflectedHandoffs({ run: ctx.run, memo: ctx.memo, proven: new Set(), isRunning: () => false }).cleaned, [], '반영된 것이 없으면 아무것도');
+});
+
 // ---------- gh 배선 ----------
 test('makeGhDeps.fetchIssue: 단일 상태 라벨과 마지막 결과 보고서 댓글 URL', async () => {
   const seen = [];
@@ -394,6 +432,21 @@ test('run-operator: 이슈마다 보고 줄 하나, 자식 출력은 새지 않�
   const [c] = fake.calls();
   assert.ok(c.stdin.includes('AGENT-DOC') && c.stdin.includes('WORK-DOC'));
   assert.ok(c.stdin.includes('h1') && c.stdin.includes('7') && c.stdin.includes('8'));
+});
+
+test('run-operator: 세션이 끝나면 그 하달의 워커 작업 폴더를 지우고 브랜치는 남긴다', async () => {
+  const ctx = makeRun();
+  addHandoffNamespace(ctx, 'h2'); // 다른 하달은 건드리지 않는다
+  fakeEnv({ memo: ctx.memo, run: ctx.run });
+  process.env.FAKE_ADD_WT = '1';
+  try {
+    const { code } = await runMain(['--issues', '7'], ctx, stubs());
+    assert.equal(code, 0);
+  } finally { delete process.env.FAKE_ADD_WT; }
+  assert.ok(!existsSync(`${ctx.run}/worktrees/h1`), 'h1 작업 폴더 없음');
+  assert.ok(existsSync(`${ctx.run}/worktrees/h2/issue-7`));
+  assert.ok(branchesOf(ctx.memo).includes('h1/issue-7'), '브랜치는 남는다');
+  assert.ok(!git(ctx.memo, 'worktree', 'list').includes('/worktrees/h1/'));
 });
 
 test('run-operator: 막힘이 있으면 종료 코드 1', async () => {

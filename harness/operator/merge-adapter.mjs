@@ -7,9 +7,9 @@ import { resolve as resolvePath, dirname } from 'node:path';
 import { spawn as nodeSpawn, execFileSync } from 'node:child_process';
 import { loadOperatorConfig, ConfigError } from './config.mjs';
 import { handoffNames } from './handoff.mjs';
-import { workerEnv } from './run-worker.mjs';
+import { workerEnv, questionRecordFile } from './run-worker.mjs';
 import { formatLine, exitCode, STATES } from './report.mjs';
-import { assertPlain, isStopped, killTree as defaultKillTree } from './launch.mjs';
+import { assertPlain, isStopped, killTree as defaultKillTree, pruneReflectedHandoffs, readPruned } from './launch.mjs';
 import { makeGhDeps } from './run-operator.mjs';
 import { plainLines, parseDependsOn } from './issue-body.mjs';
 import { REPORT_HEAD, VERDICT_ALLOW, VERDICT_REJECT, ALLOWED_COMMIT, ALLOWED_COMMIT_LINE, LABEL } from './protocol.mjs';
@@ -934,6 +934,8 @@ async function runEnqueue({ run, config, cfg, handoff, env, deps }) {
   for (const n of numbers) {
     const state = stateOf(datas.get(n)?.labels);
     if (state !== null && ENQUEUE_KEEP.has(state)) skipped.push({ number: n, state, url: issueUrl(config, n, datas.get(n)) });
+    // 워커가 묻고 아직 답을 받지 못했다(질문 기록이 남음, 결정 8-38): 브랜치에 질문 전의 반쯤 한 커밋이 있을 수 있어 합치지 않는다.
+    else if (existsSync(questionRecordFile(run, handoff, n))) skipped.push({ number: n, state: LABEL.막힘, url: issueUrl(config, n, datas.get(n)) });
     else if (onMain.has(n)) skipped.push({ number: n, state: LABEL.반영됨, url: issueUrl(config, n, datas.get(n)) });
     else todo.push(n);
   }
@@ -1041,7 +1043,21 @@ async function runLand({ run, config, cfg, handoff, env, deps }) {
     if (order) throw new HarnessError(order);
   } finally { session.close(); }
   const numbers = tips.map((t) => t.n);
-  if (numbers.length === 0) throw new HarnessError('이 하달의 이슈 브랜치가 없습니다.');
+  if (numbers.length === 0) {
+    // 반영된 뒤 정리된 하달(pruned.json)을 다시 반영하면: 오류가 아니라 지금 상태를 보고한다(main에 있으면 반영됨).
+    const pruned = readPruned(run, handoff);
+    if (!pruned) throw new HarnessError('이 하달의 이슈 브랜치가 없습니다.');
+    const check = openGit(ctx);
+    let proven;
+    try { proven = provenIssuesOnMain(check.git, ctx); } finally { check.close(); }
+    (deps.writeErr ?? ((line) => console.error(line)))(`참고: ${handoff}는 반영된 뒤 정리된 하달입니다(브랜치 없음). 지금 상태만 보고합니다.`);
+    const rows = [];
+    for (const n of pruned) {
+      const data = await fetchIssueData(n);
+      rows.push({ number: n, state: proven.has(n) ? LABEL.반영됨 : LABEL.보류, url: issueUrl(config, n, { ...data, number: n }) });
+    }
+    return rows;
+  }
   const issues = [];
   for (const n of numbers) issues.push({ ...(await fetchIssueData(n)), number: n });
   // 의존 절을 읽을 수 없는 이슈는 허용 수집에서 빠진다(불명확하면 제외). 보고 줄만으로는 이유가 보이지 않으므로 stderr에 한 줄 남긴다.
@@ -1195,6 +1211,19 @@ export async function runScript(kind, argv, env = process.env, deps = {}) {
       release();
     }
     write(rows.map((r) => formatLine(r)).join('\n'));
+    // 로컬 반영(run-reflect) 뒤 브랜치 정리: 이슈가 모두 main에 반영된 하달(같은 이슈의 옛 시도 포함)의 브랜치·작업 폴더를 지운다.
+    // 원격 흐름은 run-train이 같은 일을 한다(결정 8-35). 정리 실패는 반영 결과를 바꾸지 않고 참고 줄만 남긴다(stdout은 보고 줄만).
+    if (kind === 'reflect') {
+      try {
+        const memo = fwd(config.targetProject);
+        const proven = provenIssuesOnMain(openGit({ env }).git, { memo, run, env });
+        const pr = (deps.pruneReflectedHandoffs ?? pruneReflectedHandoffs)({ run, memo, proven });
+        if (pr.cleaned.length) writeErr(`참고: 반영된 하달을 정리했습니다: ${pr.cleaned.join(', ')}(브랜치·작업 폴더)`);
+        for (const x of pr.failed) writeErr(`참고: ${x.handoff}를 정리하지 못했습니다: ${ONE_LINE(x.reason).slice(0, 160)}`);
+      } catch (e) {
+        writeErr(`참고: 반영된 하달 정리를 건너뛰었습니다(${ONE_LINE(e?.message ?? e).slice(0, 120)}).`);
+      }
+    }
     return exitCode(rows);
   } catch (e) {
     if (e instanceof StoppedError) return exitCode([], { stopped: true });
