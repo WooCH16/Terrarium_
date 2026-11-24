@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-24 (Windows)
+
+릴리스 노트: [docs/releases/v0.2.1.md](docs/releases/v0.2.1.md).
+
 ### 바뀜
 
 - **Pi 워커 확장: 묻고 기다려 답을 받는다(하네스, 결정 8-39):** Pi 워커에 하네스 확장(`harness/worker/pi-ask.js`)을 붙였습니다. 워커는 갈림길에서 `ask_operator` 도구로 오퍼레이터에게 묻고, 답이 올 때까지 기다렸다가 같은 세션에서 이어 갑니다. 훅은 새 패키지 설치, 기존 시험 지우기, `package.json` 의존성 더하기를 실행 전에 막고 허용 여부를 묻습니다. 답의 첫 줄이 `허용`일 때만 실행합니다. 오퍼레이터에게는 `run-worker`·`wait-operator`가 종료 코드 5(`질문 중`)와 질문·답 파일 경로로 알립니다. 여러 워커를 기다릴 때는 대기 번호를 돌아가며 기다립니다. 30분 안에 답이 없으면 예전처럼 질문 파일을 쓰고 끝냅니다(종료 코드 4). Pi는 `--no-extensions` 그대로 이 파일 하나만 `-e`로 읽고, 패키지는 설치하지 않습니다.
@@ -169,5 +173,6 @@
 - 리뷰어·라우팅이 Jev 한 곳에 달려 있습니다.
 - 하네스를 실제로 돌려 본 것은 Windows뿐입니다.
 
-[Unreleased]: https://github.com/WooCH16/Terrarium_/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/WooCH16/Terrarium_/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/WooCH16/Terrarium_/compare/v0.2.0...v0.2.1
 [0.1.0]: https://github.com/WooCH16/Terrarium_/releases/tag/v0.1.0
