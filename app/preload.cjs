@@ -31,6 +31,12 @@ contextBridge.exposeInMainWorld('terrarium', {
   },
   // 관제탑 위쪽 칸: 코디네이터 정보, 사용량, 계정, 실행 폴더(실제로 읽은 값만)
   app: { info: () => ipcRenderer.invoke('app:info') },
+  // 업데이트 알림: 상태 { state: idle|downloading|ready|error, version, percent }, [지금 재시작]
+  update: {
+    status: () => ipcRenderer.invoke('update:status'),
+    install: () => ipcRenderer.invoke('update:install'),
+    onStatus: (fn) => listen('update:status', fn),
+  },
   usage: { get: () => ipcRenderer.invoke('usage:get') },
   account: { get: () => ipcRenderer.invoke('account:get') },
   folders: {

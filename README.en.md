@@ -76,6 +76,8 @@ First use:
 
 The installer is not code-signed. If Windows shows "Windows protected your PC" on first launch, choose **More info → Run anyway**.
 
+Updates (installed app, from 0.2.0-beta.4): 10 seconds after launch and every 6 hours, the app checks GitHub releases for a new version. If one exists, it downloads it in the background and shows a notice at the top of the tower. Once downloaded, **[지금 재시작]** (Restart now) installs it and reopens the app; **[나중에]** (Later) installs it the next time you close the app. You don't reinstall, and your settings (`%APPDATA%\Terrarium`) stay. Pressing Restart now while sessions are running shows the same "진행중인 세션이 있습니다." (sessions in progress) warning as closing the window. Harness files already installed in a run folder are not changed by an app update. 0.2.0-beta.3 and earlier lack this feature, so install beta.4 by hand once.
+
 ### 2. Claude CLI
 
 Run the scripts in a terminal yourself, then start `claude` in the run folder and talk to the coordinator.

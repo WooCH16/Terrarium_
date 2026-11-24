@@ -186,6 +186,8 @@ class Component extends DCLogic {
     this.toggleFolder = togglePop('folder');
     this.toggleSettings = togglePop('settings');
     this.closePop = () => this.setState({ pop: null });
+    this.updInstall = () => { if (this.backend.update) this.backend.update.install(); };
+    this.updLater = () => { const u = this.state.upd || {}; this.setState({ updHidden: u.state + (u.version ? ' ' + u.version : '') }); };
     // 설정 화면(계정 키·사전 점검, 실행 폴더 설치, 진행 기록)은 본창 위에 겹쳐 뜬다.
     const settings = (tab) => () => { this.setState({ pop: null }); this.backend.terminal.openSettings(tab); };
     this.openSettings = settings('accounts');
@@ -573,6 +575,12 @@ class Component extends DCLogic {
     };
     pull();
     this.pullTimer = setInterval(pull, 30000);
+    // 업데이트 알림(설치판에서만 옴). [나중에]는 이 버전 알림만 숨긴다.
+    if (be.update) {
+      const onUpd = (u) => { if (u) this.setState({ upd: u }); };
+      be.update.status().then(onUpd);
+      be.update.onStatus(onUpd);
+    }
     be.folders.list().then((r) => {
       if (!r) return;
       this.folderList = r.folders || [];
@@ -814,6 +822,16 @@ class Component extends DCLogic {
       })(),
       usageNote: this.usage.note || '',
       openSettings: this.openSettings, goHome: this.goHome,
+      upd: (() => {
+        const u = s.upd || { state: 'idle' };
+        const v = u.version ? '(' + u.version + ')' : '';
+        const show = (u.state === 'downloading' || u.state === 'ready' || u.state === 'error') && s.updHidden !== u.state + (u.version ? ' ' + u.version : '');
+        const text = u.state === 'ready' ? '새 버전' + v + '을 받아 두었습니다. 재시작하면 업데이트됩니다(나중에 하면 앱을 닫을 때 깔립니다).'
+          : u.state === 'error' ? '새 버전' + v + '을 받지 못했습니다. 나중에 다시 확인합니다.'
+          : '새 버전' + v + '이 있습니다. 받는 중… ' + (u.percent || 0) + '%';
+        return { show, text, ready: u.state === 'ready', dot: u.state === 'error' ? '#f07a73' : '#5fd0b5' };
+      })(),
+      updInstall: this.updInstall, updLater: this.updLater,
       pop: { folder: s.pop === 'folder', settings: s.pop === 'settings' },
       popL: Math.round(s.lpX + s.lpW + 8), popR: Math.round(s.rpR + s.rpW + 8),
       toggleFolder: this.toggleFolder, toggleSettings: this.toggleSettings, closePop: this.closePop,

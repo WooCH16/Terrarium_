@@ -81,10 +81,20 @@
 - Jev 표시가 12초마다 어드바이저 쪽과 오퍼레이터 쪽을 번갈아 4초씩 켭니다.
 - 3분이 지나면 시험 전 화면으로 돌아갑니다. 시험 동안에도 진짜 기록은 계속 세고, 돌아올 때 지금 상태를 다시 그립니다. 다시 치면 처음부터 다시 돕니다.
 
+## 7-1. 업데이트 알림
+
+설치판(`app.isPackaged`)에서만 켭니다. 코드는 `app/lib/updater.mjs`(`UpdateNotifier`)이고, `electron-updater` 6이 GitHub 릴리스(`package.json`의 `build.publish`: `WooCH16/Terrarium_`, prerelease 포함)를 읽습니다.
+
+- **확인:** 앱을 켜고 10초 뒤, 그 뒤 6시간마다. 확인에 실패하면(오프라인 등) 조용히 넘어가고 다음 확인 때 다시 봅니다.
+- **받기:** 새 버전이 있으면 뒤에서 받습니다. 관제탑 위쪽 가운데에 "새 버전(…)이 있습니다. 받는 중… n%"를 띄웁니다. 받다가 실패하면 그렇다고 알립니다.
+- **깔기:** 다 받으면 [지금 재시작]·[나중에]. [지금 재시작]은 조용히 깔고 다시 켭니다. 세션이 돌고 있으면 먼저 "진행중인 세션이 있습니다." 경고를 띄웁니다(확인·돌아가기). [나중에]는 이 알림만 숨기고, 앱을 닫을 때 깔립니다.
+- **이벤트:** 메인 → 관제탑 `update:status` `{ state: idle|downloading|ready|error, version, percent }`. 관제탑은 `update:status`(지금 상태 읽기), `update:install`(지금 재시작)을 부릅니다.
+- **릴리스 올리기:** `npm run dist`(`--publish never`, 손으로 올림)가 `app/dist/`에 설치 파일, `.blockmap`, `latest.yml`을 만듭니다. 세 파일을 모두 GitHub 릴리스에 올려야 설치판이 새 버전을 봅니다. `latest.yml`에는 설치 파일 이름과 SHA-512가 들어 있어, 올린 파일 이름이 다르면 받지 못합니다. 그래서 공백을 `-`로 바꾼 이름(`Terrarium-Setup-<버전>.exe`)으로 올립니다.
+
 ## 8. 시험
 
-- `cd app && npm test`: 기록 → 이벤트(`test/flow.test.mjs`), `/testgo` 시간표와 입력 가로채기(`test/testgo.test.mjs`). 기록은 하네스의 기록 함수(`writeDispatch`, `logWorker`)로 씁니다.
-- `cd app && npm run smoke`: 진짜 앱 창을 띄우고 입력 이벤트로 움직입니다. 코디네이터는 가짜(`test/fake-coordinator.mjs`)라 모델·네트워크·GitHub를 부르지 않습니다. 하달 한 번에 딱 필요한 세션(어드바이저 1, 하달한 두 팀의 오퍼레이터, 워커 2)만 뜨는지, 끝난 세션이 사라지는지, Jev 판정 때 Jev 표시가 켜지는지, 하위 세션 없는 차례에는 아무것도 뜨지 않는지, 새 지시가 화면을 비우지 않는지, 세션이 도는 동안 창을 닫으면 경고가 뜨는지, `/testgo`(짧게 15초로 돌림) 등 36개를 봅니다. 결과와 그림은 `app/out/smoke/`.
+- `cd app && npm test`: 기록 → 이벤트(`test/flow.test.mjs`), `/testgo` 시간표와 입력 가로채기(`test/testgo.test.mjs`), 업데이트 알림 상태(`test/updater.test.mjs`). 기록은 하네스의 기록 함수(`writeDispatch`, `logWorker`)로 씁니다.
+- `cd app && npm run smoke`: 진짜 앱 창을 띄우고 입력 이벤트로 움직입니다. 코디네이터는 가짜(`test/fake-coordinator.mjs`)라 모델·네트워크·GitHub를 부르지 않습니다. 하달 한 번에 딱 필요한 세션(어드바이저 1, 하달한 두 팀의 오퍼레이터, 워커 2)만 뜨는지, 끝난 세션이 사라지는지, Jev 판정 때 Jev 표시가 켜지는지, 하위 세션 없는 차례에는 아무것도 뜨지 않는지, 새 지시가 화면을 비우지 않는지, 세션이 도는 동안 창을 닫으면 경고가 뜨는지, `/testgo`(짧게 15초로 돌림), 업데이트 알림 띠 등 37개를 봅니다. 결과와 그림은 `app/out/smoke/`.
 - 실제 모델로 도는 종단 시험은 `harness/e2e/`(비용 발생)입니다.
 
 ## 9. 예전 관제탑에서 빠진 것

@@ -14,6 +14,7 @@ import { readStatus } from './lib/status.mjs';
 import { FlowTracker, readFlowSnapshot } from './lib/flow.mjs';
 import { testgoTimeline, scanTestgo } from './lib/testgo.mjs';
 import { install, checkInstallInput, originRepo } from './lib/install.mjs';
+import { UpdateNotifier } from './lib/updater.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fwd = (p) => String(p).replace(/\\/g, '/');
@@ -94,7 +95,7 @@ function towerWindow({ show = true } = {}) {
   // 창을 닫을 때 진행 중인 세션이 있으면 묻는다: [확인] 닫기, [돌아가기] 그대로.
   let closeOk = false;
   w.on('close', (e) => {
-    if (closeOk) return;
+    if (closeOk || updateQuit) return;
     const n = flow?.busyCount() ?? 0;
     if (!n) return;
     e.preventDefault();
@@ -112,11 +113,41 @@ function towerWindow({ show = true } = {}) {
 }
 // 창 닫기 확인 대화상자(스모크 시험이 바꿔 끼운다).
 let askClose = (w, opts) => dialog.showMessageBox(w, opts);
+
+// 업데이트 알림(설치판에서만): GitHub 릴리스의 새 버전을 뒤에서 받아 두고 관제탑에 알린다. lib/updater.mjs
+let updates = null;
+let updateQuit = false;
+async function startUpdates() {
+  if (!app.isPackaged) return;
+  try {
+    const m = await import('electron-updater');
+    const autoUpdater = m.autoUpdater ?? m.default?.autoUpdater;
+    updates = new UpdateNotifier(autoUpdater, { send: (s) => toTower('update:status', s), log: (msg) => console.error(msg) });
+    updates.start();
+  } catch (e) { console.error(`업데이트 알림을 켜지 못함: ${e?.message ?? e}`); }
+}
+ipcMain.handle('update:status', () => updates?.status ?? { state: 'idle' });
+ipcMain.handle('update:install', async () => {
+  if (!updates || updates.status.state !== 'ready') return false;
+  const n = flow?.busyCount() ?? 0;
+  if (n && win && !win.isDestroyed()) {
+    const r = await askClose(win, {
+      type: 'warning', buttons: ['확인', '돌아가기'], defaultId: 1, cancelId: 1, noLink: true, title: 'Terrarium',
+      message: '진행중인 세션이 있습니다.',
+      detail: `돌고 있는 세션 ${n}개(코디네이터·어드바이저·오퍼레이터·워커).\n\n확인을 누르면 앱을 닫고 업데이트를 깐 뒤 다시 켭니다. 코디네이터의 지금 차례는 끊깁니다. 이미 하달된 오퍼레이터·워커는 따로 돌며 끝까지 갑니다.\n돌아가기를 누르면 업데이트는 다음에 앱을 닫을 때 깔립니다.`,
+    });
+    if (r.response !== 0) return false;
+  }
+  updateQuit = true;
+  return updates.install();
+});
+
 function createWindow() {
   win = towerWindow();
   // 메뉴줄은 숨긴다(설정은 오른쪽 위 톱니). 메뉴의 단축키(다시 읽기, 개발자 도구, 끝내기)는 그대로 쓴다.
   win.loadFile(towerPage);
   startFlow();
+  startUpdates();
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: '설정', submenu: [
       { label: '계정', click: () => openSettings('accounts') },
@@ -566,6 +597,14 @@ async function smoke(dir) {
     closeSettings();
     await wait(200);
     check('프로필 단추는 없다', !(await rectOf('button[aria-label="Profile"]')));
+    // 업데이트 알림 띠: 받아 두면 [지금 재시작]·[나중에], [나중에]는 숨긴다(설치판에서만 오는 상태를 흉내).
+    toTower('update:status', { state: 'ready', version: '9.9.9' });
+    await wait(200);
+    const updText = await js(`(document.querySelector('[role="status"][aria-label="업데이트"]') || {}).innerText || ''`);
+    await js(`[...document.querySelectorAll('[role="status"][aria-label="업데이트"] button')].find((b) => b.textContent.includes('나중에')).click()`);
+    await wait(200);
+    const updGone = !(await rectOf('[role="status"][aria-label="업데이트"]'));
+    check('업데이트 알림: 받아 둔 새 버전을 [지금 재시작]과 함께 알리고 [나중에]로 숨긴다', /9\.9\.9/.test(updText) && /지금 재시작/.test(updText) && updGone, { updText, updGone });
 
     // ---- 하달: 코디네이터 터미널에 지시 → 필요한 만큼만 세션이 뜬다 ----
     // Jev 불빛은 화면 상태를 짧게 자주 읽어 본다(켜진 적이 있는지).
