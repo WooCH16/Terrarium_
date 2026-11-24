@@ -91,6 +91,7 @@
 - **깔기:** 다 받으면 [지금 재시작]·[나중에]. [지금 재시작]은 조용히 깔고 다시 켭니다. 세션이 돌고 있으면 먼저 "진행중인 세션이 있습니다." 경고를 띄웁니다(확인·돌아가기). [나중에]는 이 알림만 숨기고, 앱을 닫을 때 깔립니다.
 - **이벤트:** 메인 → 관제탑 `update:status` `{ state: idle|downloading|ready|error, version, percent }`. 관제탑은 `update:status`(지금 상태 읽기), `update:install`(지금 재시작)을 부릅니다.
 - **릴리스 올리기:** `npm run dist`(`--publish never`, 손으로 올림)가 `app/dist/`에 설치 파일, `.blockmap`, `latest.yml`을 만듭니다. 세 파일을 모두 GitHub 릴리스에 올려야 설치판이 새 버전을 봅니다. `latest.yml`에는 설치 파일 이름과 SHA-512가 들어 있어, 올린 파일 이름이 다르면 받지 못합니다. 그래서 공백을 `-`로 바꾼 이름(`Terrarium-Setup-<버전>.exe`)으로 올립니다.
+- **실제 확인:** 2026-11-24 설치판 0.2.0-beta.4가 0.2.0-beta.5를 알리고, [지금 재시작]으로 다시 설치 없이 업데이트됐습니다(소유자 확인). 기록은 `docs/checks/app-screen-replace.md`의 "업데이트 알림".
 
 ## 8. 시험
 
