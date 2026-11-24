@@ -10,6 +10,8 @@ import { randomBytes } from 'node:crypto';
 import { basename } from 'node:path';
 
 export const WAITING = 8;
+// 분리 실행한 워커가 오퍼레이터의 답을 기다리는 중(결정 8-39). 답 파일을 쓰고 같은 번호를 다시 기다린다.
+export const ASKING = 5;
 export const TOKEN = /^[0-9a-f]{12}$/;
 const DEFAULT_WAIT_MS = 9 * 60 * 1000;
 const MAX_LIFE_MS = 8 * 60 * 60 * 1000;
@@ -62,6 +64,8 @@ export async function waitFor(run, token, { waitMs, pollMs = 1000, now = () => D
   for (;;) {
     const d = readBg(run, token);
     if (d?.done) return { done: true, lines: d.lines ?? [], errLines: d.errLines ?? [], code: d.code };
+    // 워커가 답을 기다리는데 답 파일이 아직 없으면 바로 알린다. 답을 썼으면(확장이 읽어 갈 때까지) 그냥 기다린다.
+    if (d?.asking && typeof d.asking.answer === 'string' && !existsSync(d.asking.answer)) return { asking: d.asking };
     // 전체 기한: 세션 제한(2시간) + 워커 시도를 넘겨도 끝나지 않으면 죽은 것으로 본다(pid 재사용 대비).
     if (d?.startedAt && Date.now() - new Date(d.startedAt).getTime() > MAX_LIFE_MS) return { dead: true };
     const pid = d?.pid ?? launcherPid;
@@ -78,9 +82,15 @@ export async function waitFor(run, token, { waitMs, pollMs = 1000, now = () => D
   }
 }
 
-export function report(r, { token, harnessDir, write, writeErr = (l) => console.error(l) }) {
+export function report(r, { token, harnessDir, run, write, writeErr = (l) => console.error(l) }) {
   if (r.done) { for (const l of r.lines) write(l); for (const l of r.errLines ?? []) writeErr(l); return r.code; }
   if (r.dead) { write(`오류: 분리 실행(대기 번호 ${token})이 결과 없이 끝났습니다. 실행 폴더의 logs/와 handoffs/를 확인하세요.`); return 2; }
+  if (r.asking) {
+    const a = r.asking;
+    const q = /^[A-Za-z]:\/|^\//.test(String(a.question)) ? a.question : `${fwd(run ?? '.')}/${a.question}`;
+    write(`질문 중: 이슈 #${a.issue} 워커가 ${a.kind === '허용 여부' ? '명령 실행 허용 여부를' : '결정을'} 묻고 기다립니다 | 질문 파일: ${q} | 답 파일: ${a.answer} | 답을 쓴 뒤 이어서 기다리기: node ${fwd(harnessDir)}/operator/wait-operator.mjs --wait ${token}`);
+    return ASKING;
+  }
   write(`진행 중: 대기 번호 ${token} | 이어서 기다리기: node ${fwd(harnessDir)}/operator/wait-operator.mjs --wait ${token}`);
   return WAITING;
 }
@@ -106,7 +116,7 @@ export async function startAndWait({ run, harnessDir, entry, args, env = process
   // "가장 최근 bg 파일"로 찾으면 워커의 번호를 잡는다(run-18 h7, 2026-11-20). Esc 뒤 코디네이터는 이 파일 하나만 읽는다.
   if (record) writeLastWait(run, record, { token, script: basename(entry), args, startedAt });
   launcher.unref?.();
-  return report(await waitFor(run, token, { waitMs: waitMs ?? waitMsOf(env), launcherPid: launcher.pid ?? null }), { token, harnessDir, write });
+  return report(await waitFor(run, token, { waitMs: waitMs ?? waitMsOf(env), launcherPid: launcher.pid ?? null }), { token, harnessDir, run, write });
 }
 
 // 발사 프로세스: detached 자식을 띄우고, 기다리는 쪽이 볼 pid를 자식 것으로 바꿔 쓴 뒤 바로 끝난다.
@@ -130,12 +140,21 @@ export async function runDetached({ run, token, entry, argv, env, spawn = nodeSp
   return code ?? 2;
 }
 
+// 워커의 살아 있는 질문을 대기 기록에 남기고 지운다(run-worker의 onAsk·onAnswered). pid·startedAt은 그대로 두고, 끝난 기록은 건드리지 않는다.
+export function askHandlers(run, token) {
+  const patch = (fn) => { const d = readBg(run, token); if (!d || d.done) return; fn(d); writeBg(run, token, d); };
+  return {
+    onAsk: (info) => patch((d) => { d.asking = info; }),
+    onAnswered: () => patch((d) => { delete d.asking; }),
+  };
+}
+
 // 손자 쪽: main을 돌리고 결과를 쓴다. 기다리는 쪽은 detached 자식의 pid로 생사를 본다.
 export async function runChild({ run, token, main, argv, env }) {
   const lines = [];
   const errLines = [];
   let code;
-  try { code = await main(argv, env, { write: (l) => lines.push(l), writeErr: (l) => errLines.push(l) }); } catch (e) { errLines.push(`오류: ${String(e?.message ?? e).slice(0, 300)}`); code = 2; }
+  try { code = await main(argv, env, { write: (l) => lines.push(l), writeErr: (l) => errLines.push(l), ...askHandlers(run, token) }); } catch (e) { errLines.push(`오류: ${String(e?.message ?? e).slice(0, 300)}`); code = 2; }
   writeBg(run, token, { done: true, pid: readBg(run, token)?.pid ?? process.pid, lines, errLines, code, endedAt: new Date().toISOString() });
   return code;
 }

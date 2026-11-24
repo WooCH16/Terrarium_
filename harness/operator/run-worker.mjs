@@ -31,6 +31,18 @@ const MAX_RESULT_BYTES = 64 * 1024;
 const MAX_BODY_BYTES = 200 * 1024;
 const TOOLS = 'Bash Write Edit Read Glob Grep';
 export const QUESTION_EXIT = 4;
+// Pi 워커 확장(결정 8-39): 워커가 묻고 기다리는 도구 ask_operator와, 이슈에 없는 결정으로 보이는 명령을 실행 전에 허용 여부로 묻는 훅.
+// Pi는 --no-extensions 그대로 이 파일 하나만 -e로 읽는다. 질문은 워크트리의 .harness/asking.md, 답은 오퍼레이터가 .drafts/answer-<n>-h<N>-q<번호>.md에 쓴다.
+export const PI_ASK_EXT = fwd(fileURLToPath(new URL('../worker/pi-ask.js', import.meta.url)));
+const ASKING_REL = '.harness/asking.md';
+// 확장이 쓴 질문 파일의 번호와 종류. 없거나 모양이 틀리면 null.
+function readAsking(file) {
+  let t;
+  try { t = readFileSync(file, 'utf8'); } catch { return null; }
+  const id = /## 질문 번호\r?\n(\d{1,10}-\d{1,4})\s*(?:\r?\n|$)/.exec(t)?.[1];
+  const kind = /## 종류\r?\n(질문|허용 여부)\s*(?:\r?\n|$)/.exec(t)?.[1];
+  return id && kind ? { id, kind } : null;
+}
 export const MAX_QUESTIONS = 2;
 const MAX_QUESTION_BYTES = 16 * 1024;
 const MAX_ANSWER_BYTES = 16 * 1024;
@@ -314,7 +326,7 @@ function checkResult({ worktree, issue, baseCommit, branchRef, git }) {
 }
 
 // ---- 러너 실행 ----
-function runRunner({ bin, args, cwd, env, prompt, timeoutMs, stallMs = 0, spawn, kill, onPid, observer }) {
+function runRunner({ bin, args, cwd, env, prompt, timeoutMs, stallMs = 0, spawn, kill, onPid, observer, paused = () => false }) {
   return new Promise((done) => {
     let finished = false;
     let timedOut = false;
@@ -327,7 +339,11 @@ function runRunner({ bin, args, cwd, env, prompt, timeoutMs, stallMs = 0, spawn,
     const armIdle = () => {
       if (!(stallMs > 0) || finished) return;
       clearTimeout(idle);
-      idle = setTimeout(() => { stalled = true; killChild(); setTimeout(() => finish({ code: 1, stalled: true }), 2000).unref(); }, stallMs);
+      idle = setTimeout(() => {
+        // 워커가 오퍼레이터의 답을 기다리는 중이면(질문 파일이 있음) 출력이 없는 것이 정상이다: 다시 잰다(결정 8-39).
+        if (paused()) { armIdle(); return; }
+        stalled = true; killChild(); setTimeout(() => finish({ code: 1, stalled: true }), 2000).unref();
+      }, stallMs);
     };
     const killChild = () => {
       if (process.platform === 'win32' && child.pid) { try { kill(child.pid); } catch { /* 이미 끝남 */ } }
@@ -439,6 +455,14 @@ export async function main(argv, env = process.env, deps = {}) {
     const logFile = `${harnessFolder}/runner.log`;
     const difficulty = difficultyOf(body); // 이슈 본문의 `난이도:`(라우팅이 정함). 러너가 tiers를 두면 그 모델로 띄운다
     const excludeFile = `${run}/handoffs/${handoff}/worker-${issue}.exclude`;
+    const askFile = `${harnessFolder}/${ASKING_REL.slice('.harness/'.length)}`;
+    const answerPrefix = `${fwd(config.issuesClone)}/.drafts/answer-${issue}-${handoff}-q`;
+    const askEnv = {
+      HARNESS_ASK_FILE: askFile, HARNESS_ANSWER_PREFIX: answerPrefix, HARNESS_WORKER_ISSUE: String(issue),
+      ...(/^\d+$/.test(env.HARNESS_ASK_WAIT_MS ?? '') ? { HARNESS_ASK_WAIT_MS: env.HARNESS_ASK_WAIT_MS } : {}),
+    };
+    let liveAsked = 0;
+    try { mkdirSync(`${fwd(config.issuesClone)}/.drafts`, { recursive: true }); } catch { /* 클론이 없으면 답을 받지 못하고 확장이 질문 파일 경로로 넘어간다 */ }
     // 모델 하나의 실행 준비. 러너가 멈추면(출력 없음) 대체 모델로 다시 준비한다.
     const prepare = (ch) => {
       const { model } = ch;
@@ -458,6 +482,8 @@ export async function main(argv, env = process.env, deps = {}) {
         if (l) { bin = l.bin; args = [...l.args, ...args]; }
       }
       const childEnv = withExcludeEnv(workerEnv({ ...process.env, ...env }), excludeFile);
+      // 묻기 통로(pi-ask.js가 읽는다). workerEnv는 HARNESS_*를 넘기지 않으므로 여기서 정해 준다.
+      Object.assign(childEnv, askEnv);
       const secrets = secretsFor(cfg, model, { env, run, harnessDir });
       if (secrets === null) throw new ConfigError(`${model}에 필요한 비밀값(${(runnerCfg.secretEnv ?? []).join(', ')})이 없습니다. 환경 변수나 실행 폴더의 .env에 넣으세요.`);
       Object.assign(childEnv, secrets);
@@ -476,6 +502,7 @@ export async function main(argv, env = process.env, deps = {}) {
         Object.assign(childEnv, settings.env);
       } else {
         args.push(...sandbox(worktree));
+        if (cli === 'pi') args.push('-e', PI_ASK_EXT);
         // agy는 프롬프트를 --print 인자로만 받는다(표준 입력은 읽지 않는다).
         if (cli === 'agy') args.push('--print', `${promptFile} 파일을 읽고 그 지시대로 작업하세요.`);
         Object.assign(childEnv, { GIT_AUTHOR_NAME: 'terrarium-worker', GIT_AUTHOR_EMAIL: 'worker@localhost', GIT_COMMITTER_NAME: 'terrarium-worker', GIT_COMMITTER_EMAIL: 'worker@localhost' });
@@ -522,7 +549,7 @@ export async function main(argv, env = process.env, deps = {}) {
       modelId: P.chosenModelId ?? P.runnerCfg.modelId ?? null, ...(P.runnerCfg.tiers ? { difficulty: difficulty ?? '모름(기본 모델)' } : {}), via: P.runnerCfg.via ?? 'direct', cli: P.cli,
       ...(P.runnerCfg.temporary ? { temporary: P.runnerCfg.temporary } : {}),
       isolation: ISOLATION[P.cli] ?? null,
-      worktree: `worktrees/${handoff}/issue-${issue}`, ...extra,
+      worktree: `worktrees/${handoff}/issue-${issue}`, liveQuestions: liveAsked, ...extra,
     });
     const snapshot = () => protectedSnapshot({ run, harnessDir, memo, git });
     const guardBefore = snapshot();
@@ -538,13 +565,27 @@ export async function main(argv, env = process.env, deps = {}) {
       attempts++;
       rmSync(resultFile, { force: true });
       rmSync(`${worktree}/${QUESTION_REL}`, { force: true }); // 앞 시도·앞 질문의 파일은 이번 시도의 질문이 아니다
+      rmSync(askFile, { force: true });
       writeFileSync(promptFile, inputText({ issue, worktree, body, failures, decisions }));
       let pid;
       let onSignal = null;
       let r;
       const observer = createObserver(P.cli);
+      // 살아 있는 질문(결정 8-39): 확장이 질문 파일을 쓰면 오퍼레이터에게 알리고(onAsk, 분리 실행이면 대기 기록에 남는다), 지워지면 끝을 알린다.
+      let announced = null;
+      const notify = (fn, arg) => { try { fn?.(arg); } catch { /* 알림 실패는 워커를 막지 않는다 */ } };
+      const watchAsk = () => {
+        const a = readAsking(askFile);
+        if (a && a.id !== announced) {
+          announced = a.id;
+          liveAsked++;
+          notify(deps.onAsk, { id: a.id, kind: a.kind, issue, question: `worktrees/${handoff}/issue-${issue}/${ASKING_REL}`, answer: `${answerPrefix}${a.id}.md` });
+        } else if (!a && announced !== null) { announced = null; notify(deps.onAnswered); }
+      };
+      const watcher = setInterval(watchAsk, deps.askPollMs ?? 500);
       try {
         r = await runRunner({
+          paused: () => existsSync(askFile),
           bin: P.bin, args: P.args, cwd: worktree, env: P.childEnv, prompt: P.prompt, spawn, observer, kill: deps.killTree ?? killTree,
           timeoutMs: deps.timeoutMs ?? DEFAULT_TIMEOUT_MS, stallMs: deps.stallMs ?? DEFAULT_STALL_MS,
           onPid: (p, killChild) => {
@@ -560,6 +601,9 @@ export async function main(argv, env = process.env, deps = {}) {
           },
         });
       } finally {
+        clearInterval(watcher);
+        rmSync(askFile, { force: true });
+        if (announced !== null) notify(deps.onAnswered); // 러너가 답을 받기 전에 끝났다: 대기 기록의 질문을 지운다
         if (onSignal) { process.removeListener('SIGINT', onSignal); process.removeListener('SIGTERM', onSignal); }
         if (pid !== undefined) releasePid(sessionFile, pid, now);
       }

@@ -42,6 +42,17 @@ test('결정 8-38: 워커는 갈림길에서 고르지 않고 묻고, 오퍼레�
   assert.match(w, /목표나 완료 기준을 바꾸는 답[^\n]*막힘/);
 });
 
+test('결정 8-39: Pi 워커는 ask_operator로 묻고 기다리며, 오퍼레이터는 종료 코드 5에 답 파일을 쓰고 같은 번호를 다시 기다린다', () => {
+  const wk = read('worker/AGENT.md');
+  assert.match(wk, /`ask_operator` 도구가 있으면/);
+  assert.match(wk, /허용을 묻는다/);
+  const w = read('operator/skills/operator-work/SKILL.md');
+  assert.match(w, /종료 코드[^\n]*5 질문 중/);
+  assert.match(w, /^### 워커가 묻고 기다리면\(종료 코드 5\)$/m);
+  assert.match(w, /첫 줄에 `허용` 또는 `거부`/);
+  assert.match(w, /8이 오면 다음 대기 번호로/);
+});
+
 test('work.md: worker and enqueue steps, and no direct merge into main', () => {
   const w = read('operator/skills/operator-work/SKILL.md');
   assert.match(w, /run-worker/);

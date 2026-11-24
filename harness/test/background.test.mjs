@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { main as waitMain } from '../operator/wait-operator.mjs';
 import { decide } from '../policy.mjs';
-import { startAndWait, writeBg } from '../operator/background.mjs';
+import { startAndWait, writeBg, askHandlers } from '../operator/background.mjs';
 
 const fwd = (p) => p.split(String.fromCharCode(92)).join('/');
 const made = [];
@@ -115,4 +115,52 @@ test('run-7: 코디네이터는 wait-operator.mjs --wait <12자리>만 실행할
   const bash = (command) => decide({ tool_name: 'Bash', tool_input: { command }, cwd: 'C:/run/issues' }, config, { visibility: () => 'PRIVATE', readFile: () => { throw new Error('x'); } });
   assert.equal(bash('node C:/h/operator/wait-operator.mjs --wait 0123456789ab').allow, true);
   for (const c of ['node C:/h/operator/wait-operator.mjs --wait 0123', 'node C:/h/operator/wait-operator.mjs', 'node C:/h/operator/wait-operator.mjs --wait 0123456789ab --x y']) assert.equal(bash(c).allow, false, c);
+});
+
+// ---------- 살아 있는 질문(결정 8-39): 워커가 오퍼레이터의 답을 기다리면 기다리는 쪽이 바로 알린다(종료 코드 5) ----------
+test('질문 중: 대기 기록에 답을 기다리는 질문이 있으면 wait-operator가 바로 5와 질문·답 파일·이어서 기다리기를 낸다', async () => {
+  const s = setup();
+  const token = '0123456789ab';
+  const asking = { id: '1-1', kind: '질문', issue: 7, question: 'worktrees/h1/issue-7/.harness/asking.md', answer: `${s.run}/issues/.drafts/answer-7-h1-q1-1.md` };
+  writeBg(s.run, token, { done: false, pid: process.pid, startedAt: new Date().toISOString(), asking });
+  const out = [];
+  const t0 = Date.now();
+  const code = await waitMain(['--wait', token], { HARNESS_RUN_DIR: s.run, HARNESS_BG_WAIT_MS: '20000' }, { write: (l) => out.push(l), pollMs: 50 });
+  assert.equal(code, 5, out.join('\n'));
+  assert.ok(Date.now() - t0 < 5000, '기다리지 않고 바로');
+  assert.equal(out.length, 1);
+  assert.match(out[0], /^질문 중: 이슈 #7 /);
+  assert.ok(out[0].includes(`${s.run}/worktrees/h1/issue-7/.harness/asking.md`), out[0]);
+  assert.ok(out[0].includes(asking.answer), out[0]);
+  assert.ok(out[0].includes(`wait-operator.mjs --wait ${token}`), out[0]);
+});
+
+test('질문 중: 답 파일을 이미 썼으면 다시 5를 내지 않고 계속 기다린다', async () => {
+  const s = setup();
+  const token = '0123456789ac';
+  mkdirSync(`${s.run}/issues/.drafts`, { recursive: true });
+  const answer = `${s.run}/issues/.drafts/answer-7-h1-q1-1.md`;
+  writeFileSync(answer, '파랑');
+  writeBg(s.run, token, { done: false, pid: process.pid, startedAt: new Date().toISOString(), asking: { id: '1-1', kind: '질문', issue: 7, question: 'q', answer } });
+  const out = [];
+  assert.equal(await waitMain(['--wait', token], { HARNESS_RUN_DIR: s.run, HARNESS_BG_WAIT_MS: '300' }, { write: (l) => out.push(l), pollMs: 50 }), 8, out.join('\n'));
+});
+
+test('질문 알림: onAsk는 pid·startedAt을 남긴 채 질문을 더하고, onAnswered는 질문만 지운다(끝난 기록은 건드리지 않는다)', () => {
+  const s = setup();
+  const token = '0123456789ad';
+  writeBg(s.run, token, { done: false, pid: 4242, startedAt: '2026-11-24T00:00:00.000Z' });
+  const h = askHandlers(s.run, token);
+  h.onAsk({ id: '1-1', kind: '질문', issue: 7, question: 'q', answer: 'a' });
+  let d = JSON.parse(readFileSync(`${s.run}/handoffs/bg/${token}.json`, 'utf8'));
+  assert.equal(d.pid, 4242);
+  assert.equal(d.startedAt, '2026-11-24T00:00:00.000Z');
+  assert.equal(d.asking.issue, 7);
+  h.onAnswered();
+  d = JSON.parse(readFileSync(`${s.run}/handoffs/bg/${token}.json`, 'utf8'));
+  assert.equal(d.asking, undefined);
+  assert.equal(d.pid, 4242);
+  writeBg(s.run, token, { done: true, pid: 4242, lines: ['x'], code: 0 });
+  h.onAsk({ id: '1-2', kind: '질문', issue: 7, question: 'q', answer: 'a' });
+  assert.equal(JSON.parse(readFileSync(`${s.run}/handoffs/bg/${token}.json`, 'utf8')).asking, undefined, '끝난 기록에는 질문을 더하지 않는다');
 });
