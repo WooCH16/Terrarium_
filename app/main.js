@@ -565,12 +565,7 @@ async function smoke(dir) {
     check('[설정 열기]가 본창 안에 설정 화면(계정·설치·진행)을 띄운다', win.contentView.children.includes(settingsView));
     closeSettings();
     await wait(200);
-    const prof = await rectOf('button[aria-label="Profile"]');
-    await click(prof.x, prof.y);
-    await wait(200);
-    const acct = await js(`(document.querySelector('[role="dialog"][aria-label="계정 정보"]') || {}).innerText || ''`);
-    check('계정 칸에 실행 폴더와 지정 저장소가 보인다', /smoke-run/.test(acct) && /owner\/smoke-issues/.test(acct), acct.slice(0, 200));
-    await click(prof.x, prof.y);
+    check('프로필 단추는 없다', !(await rectOf('button[aria-label="Profile"]')));
 
     // ---- 하달: 코디네이터 터미널에 지시 → 필요한 만큼만 세션이 뜬다 ----
     // Jev 불빛은 화면 상태를 짧게 자주 읽어 본다(켜진 적이 있는지).

@@ -63,7 +63,7 @@ npm run dist         # Windows installer: app/dist/Terrarium Setup <version>.exe
 
 Screen test `/testgo`: type `/testgo` in the coordinator terminal and press Enter to run a 3-minute test of the screen layout. Three advisors and operators for all five teams appear, workers are added one every 4 seconds (n workers under the n-th team, 15 in all), and the JEV marks light up every 12 seconds, alternating between the advisor and operator sides. After 3 minutes the screen returns to what it showed before. The line is not sent to the coordinator, no model or GitHub call is made, and nothing is written to the run folder. It also works while the coordinator is not running. See "화면 시험 `/testgo`" in [docs/app-screen.md](docs/app-screen.md).
 
-Press the gear at the tower's top right, then **[설정 열기]** (Open settings), to switch the main window to the settings screen (계정 관리 and 진행 기록 in the profile button open the same screen). The run folder choice, API keys, and designated repository take effect only after **[저장]** (Save) → **저장하기** (Save), which also returns you to the tower. **[돌아가기]** (Back) or Esc returns without saving.
+Press the gear at the tower's top right, then **[설정 열기]** (Open settings), to switch the main window to the settings screen. The run folder choice, API keys, and designated repository take effect only after **[저장]** (Save) → **저장하기** (Save), which also returns you to the tower. **[돌아가기]** (Back) or Esc returns without saving.
 
 First use:
 

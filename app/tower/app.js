@@ -185,13 +185,10 @@ class Component extends DCLogic {
     const togglePop = (k) => () => this.setState({ pop: this.state.pop === k ? null : k });
     this.toggleFolder = togglePop('folder');
     this.toggleSettings = togglePop('settings');
-    this.toggleProfile = togglePop('profile');
     this.closePop = () => this.setState({ pop: null });
     // 설정 화면(계정 키·사전 점검, 실행 폴더 설치, 진행 기록)은 본창 위에 겹쳐 뜬다.
     const settings = (tab) => () => { this.setState({ pop: null }); this.backend.terminal.openSettings(tab); };
     this.openSettings = settings('accounts');
-    this.openAccounts = settings('accounts');
-    this.openProgress = settings('progress');
     this.goHome = () => {
       this.camTarget = null;
       this.cam = { x: 0, y: 0, z: 1 };
@@ -816,11 +813,10 @@ class Component extends DCLogic {
         return { pct: m.pct, resetText: m.resetText, title: m.label + ' ' + m.pct + '% · ' + m.resetText, dash: on.toFixed(1) + ' ' + (len - on).toFixed(1) };
       })(),
       usageNote: this.usage.note || '',
-      accountNote: this.account.note || '',
-      openSettings: this.openSettings, openAccounts: this.openAccounts, openProgress: this.openProgress, goHome: this.goHome,
-      pop: { folder: s.pop === 'folder', settings: s.pop === 'settings', profile: s.pop === 'profile' },
+      openSettings: this.openSettings, goHome: this.goHome,
+      pop: { folder: s.pop === 'folder', settings: s.pop === 'settings' },
       popL: Math.round(s.lpX + s.lpW + 8), popR: Math.round(s.rpR + s.rpW + 8),
-      toggleFolder: this.toggleFolder, toggleSettings: this.toggleSettings, toggleProfile: this.toggleProfile, closePop: this.closePop,
+      toggleFolder: this.toggleFolder, toggleSettings: this.toggleSettings, closePop: this.closePop,
       lpX: Math.round(s.lpX), lpY: Math.round(s.lpY), lpW: Math.round(s.lpW),
       rpR: Math.round(s.rpR), rpY: Math.round(s.rpY), rpW: Math.round(s.rpW),
       rpGrab: this.rpGrab, rpRs: this.rpRs, rpCursor: s.rpDrag ? 'grabbing' : 'grab',

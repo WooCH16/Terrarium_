@@ -14,7 +14,7 @@
 | 그 아래 WORKERS | 그 하달에서 워커를 부른 이슈 하나당 창 하나, 모델은 하네스가 고른 값 | `handoffs/h<N>/workers.jsonl`의 `start` |
 | JEV 표시 | Jev가 판정하는 동안 켜짐. 어드바이저 쪽: 조언 판정(`run-reviewer --advice` → `advice-log.jsonl`). 오퍼레이터 쪽: 리뷰어 판정(코디네이터의 `run-reviewer --issue`, 코디네이터가 다음 도구를 쓸 때까지)과 워커 모델 라우팅(워커가 뜰 때 2.5초) | `jev.active` 이벤트 |
 | 왼쪽 위 | [처음 화면], 실행 폴더 단추(목록, 다른 폴더 열기), 열어 둔 실행 폴더 탭 | 앱 설정(`prefs.json`)의 실행 폴더 목록 |
-| 오른쪽 위 | live 수, 시각, 사용량, 톱니(설정 요약 → [설정 열기]), 프로필(계정 관리, 진행 기록) | statusline 파일, `gh api user`, 실행 폴더의 `harness.json` |
+| 오른쪽 위 | live 수, 시각, 사용량, 톱니(설정 요약 → [설정 열기]) | statusline 파일, `gh api user`, 실행 폴더의 `harness.json` |
 
 하달하지 않은 팀의 오퍼레이터, 하달에 없는 이슈의 워커는 화면에 나오지 않습니다. 미리 자리를 잡지 않고 실제로 생긴 세션만 그립니다.
 
