@@ -780,6 +780,22 @@ test('run-reflect: 허용된 이슈를 main에 병합하고 반영됨으로 표�
   }
 });
 
+test('run-reflect: 반영한 뒤 이슈가 모두 반영된 하달(같은 이슈의 옛 시도 포함)의 브랜치를 지우고, 반영 안 된 하달은 남긴다', T, async () => {
+  const f = fixture({ config: { reviewerLogin: 'rev' } });
+  mkdirSync(`${f.run}/handoffs/h2`, { recursive: true });
+  mkdirSync(`${f.run}/handoffs/h3`, { recursive: true });
+  branch(f, 7, { 'feature7.txt': 'first try\n' }, { handoff: 'h1' }); // 거부돼 다시 보낸 옛 시도
+  const s7 = branch(f, 7, { 'feature7.txt': 'seven\n' }, { handoff: 'h2' });
+  branch(f, 9, { 'feature9.txt': 'nine\n' }, { handoff: 'h3' }); // 아직 반영 안 됨
+  const c = collector();
+  const code = await reflectMain(['--handoff', 'h2'], env(f), { ...c.deps, runTests: passAll, fetchIssueData: async (n) => issue(n, { sha: s7 }), setState: async () => {} });
+  assert.equal(code, 0);
+  assert.deepEqual(c.out, ['#7 | 반영됨 | https://github.com/o/r/issues/7'], '보고 줄만 stdout');
+  const branches = git(f.memo, 'for-each-ref', '--format=%(refname:short)', 'refs/heads').split('\n').filter(Boolean).sort();
+  assert.deepEqual(branches, ['h3/issue-9', 'main']);
+  assert.ok(c.err.some((l) => /^참고: 반영된 하달을 정리했습니다: h1, h2/.test(l)), c.err.join('\n'));
+});
+
 test('run-reflect: 거부목록 이슈와 그에 의존하는 이슈는 빠지고 종료 코드 1, 허용된 다른 이슈는 반영된다', T, async () => {
   const f = fixture();
   const s7 = branch(f, 7, { 'feature7.txt': 'rejected\n' });
