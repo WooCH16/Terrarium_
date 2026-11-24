@@ -1,0 +1,117 @@
+# Terrarium 하네스 이슈 PR (결정 8-32). 하네스가 리뷰어 허용 뒤 h<N>/issue-<번호>를 올리면
+# integration/h<N>으로 가는 이슈 PR을 열고(이미 열려 있으면 push가 머리 커밋을 바꾼 것이다) CI를 부른다.
+# 하네스는 이 PR을 읽기만 한다(gh pr list·checks). PR 본문에는 지정 저장소 이슈 링크만 단다(이슈 본문·판정 원문은 옮기지 않는다:
+# 공개 저장소면 남이 읽을 수 있고, 지정 저장소 링크는 남이 열 수 없다).
+# 저장소 설정에서 "Allow GitHub Actions to create and approve pull requests"가 켜져 있어야 PR을 연다(확인 필요: 설정 이름).
+# 결정 8-35: 재작업으로 새 하달의 h<M>/issue-<X>가 올라오면 같은 이슈의 앞선 하달(h<N>, N < M) 이슈 PR을 "h<M>에서 다시 함" 댓글과 함께 닫고
+# 그 원격 브랜치를 지운다. 그 하달에 이슈 브랜치가 하나도 남지 않고 열린 하달 PR도 없으면 integration/h<N>도 지운다.
+# 지우기는 safe_delete 하나로만 한다: h<N>/issue-<번호>, integration/h<N>, train/<날짜>-<순번> 세 모양만, main은 절대 지우지 않는다.
+name: harness-issue-pr
+
+on:
+  push:
+    branches:
+      - 'h*/issue-*'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: harness-issue-pr-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  open-pr:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.pr.outputs.sha }}
+      skip: ${{ steps.pr.outputs.skip }}
+    steps:
+      - name: 브랜치 모양 확인, 이슈 PR 열기
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          ISSUES_REPO: '{{REPO}}'
+        run: |
+          set -euo pipefail
+          if [[ ! "$BRANCH" =~ ^(h[1-9][0-9]{0,8})/issue-([1-9][0-9]{0,8})$ ]]; then
+            echo "::error::하네스 이슈 브랜치 모양(h<N>/issue-<번호>)이 아니다"
+            exit 1
+          fi
+          HANDOFF="${BASH_REMATCH[1]}"
+          ISSUE="${BASH_REMATCH[2]}"
+          BASE="integration/$HANDOFF"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          if ! gh api "repos/$REPO/branches/$BASE" --silent; then
+            echo "::error::$BASE가 원격에 없다(하네스의 push-branch가 먼저 올린다)"
+            exit 1
+          fi
+          AHEAD=$(gh api "repos/$REPO/compare/$BASE...$SHA" --jq '.ahead_by')
+          if [ "$AHEAD" = "0" ]; then
+            echo "$BASE에 이미 들어 있어 이슈 PR을 열지 않는다"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          NUM=$(gh pr list --repo "$REPO" --head "$BRANCH" --base "$BASE" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$NUM" ]; then
+            echo "이슈 PR #$NUM이 이미 있다(머리 커밋이 바뀌었다)"
+            exit 0
+          fi
+          BODY="하네스 이슈 PR(결정 8-32). 하달 $HANDOFF, 이슈 #$ISSUE.
+          이슈와 리뷰어 판정: https://github.com/$ISSUES_REPO/issues/$ISSUE (지정 저장소, 비공개)
+          이슈 본문과 판정 원문은 옮기지 않는다. 머지는 하달 PR과 머지 트레인이 한다."
+          gh pr create --repo "$REPO" --base "$BASE" --head "$BRANCH" --title "이슈 #$ISSUE ($HANDOFF)" --body "$BODY"
+
+  ci:
+    needs: open-pr
+    if: needs.open-pr.outputs.skip != 'true'
+    uses: ./.github/workflows/harness-ci.yml
+    with:
+      ref: ${{ needs.open-pr.outputs.sha }}
+
+  close-older:
+    needs: open-pr
+    runs-on: ubuntu-latest
+    steps:
+      - name: 앞선 하달의 같은 이슈 PR 닫기, 옛 브랜치 지우기
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$BRANCH" =~ ^h([1-9][0-9]{0,8})/issue-([1-9][0-9]{0,8})$ ]]; then
+            echo "::error::하네스 이슈 브랜치 모양(h<N>/issue-<번호>)이 아니다"
+            exit 1
+          fi
+          M="${BASH_REMATCH[1]}"
+          ISSUE="${BASH_REMATCH[2]}"
+          safe_delete() {
+            local b="$1"
+            if [ "$b" = "main" ] || [[ ! "$b" =~ ^(h[1-9][0-9]{0,8}/issue-[1-9][0-9]{0,8}|integration/h[1-9][0-9]{0,8}|train/[0-9]{8}-[0-9]{1,9})$ ]]; then
+              echo "::warning::하네스 브랜치 모양이 아니어서 지우지 않는다: $b"
+              return 0
+            fi
+            gh api -X DELETE "repos/$REPO/git/refs/heads/$b" --silent || echo "::warning::$b를 지우지 못했다"
+          }
+          TOUCHED=()
+          for b in $(gh api --paginate "repos/$REPO/git/matching-refs/heads/h" --jq '.[].ref | ltrimstr("refs/heads/")'); do
+            if [[ "$b" =~ ^h([1-9][0-9]{0,8})/issue-([1-9][0-9]{0,8})$ ]] && [ "${BASH_REMATCH[2]}" = "$ISSUE" ] && [ "${BASH_REMATCH[1]}" -lt "$M" ]; then
+              N="${BASH_REMATCH[1]}"
+              for num in $(gh pr list --repo "$REPO" --head "$b" --state open --json number --jq '.[].number'); do
+                gh pr close "$num" --repo "$REPO" --comment "h$M에서 다시 함(이슈 #$ISSUE, 결정 8-35)" || echo "::warning::PR #$num을 닫지 못했다"
+              done
+              safe_delete "$b"
+              TOUCHED+=("h$N")
+            fi
+          done
+          for h in ${TOUCHED[@]+"${TOUCHED[@]}"}; do
+            LEFT=$(gh api "repos/$REPO/git/matching-refs/heads/$h/issue-" --jq 'length')
+            OPEN=$(gh pr list --repo "$REPO" --head "integration/$h" --state open --json number --jq 'length')
+            if [ "$LEFT" = "0" ] && [ "$OPEN" = "0" ]; then safe_delete "integration/$h"; fi
+          done

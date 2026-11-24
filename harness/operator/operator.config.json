@@ -1,0 +1,46 @@
+{
+  "allowedModels": ["claude", "gemini", "muse"],
+  "runners": {
+    "claude": {
+      "command": ["pi", "-p", "--no-session", "--no-extensions", "--no-skills", "--no-mcp", "--no-context-files", "--no-prompt-templates", "--no-themes", "--mode", "json", "--model", "anthropic/claude-sonnet-5-5"],
+      "cli": "pi", "via": "pi", "modelId": "anthropic/claude-sonnet-5-5",
+      "tiers": { "쉬움": "anthropic/claude-haiku-5-5", "어려움": "anthropic/claude-sonnet-5-5" }
+    },
+    "gemini": {
+      "command": ["pi", "-p", "--no-session", "--no-extensions", "--no-skills", "--no-mcp", "--no-context-files", "--no-prompt-templates", "--no-themes", "--mode", "json", "--model", "google/gemini-4-hydrogen:medium"],
+      "cli": "pi", "via": "pi", "modelId": "google/gemini-4-hydrogen:medium", "secretEnv": ["GEMINI_API_KEY"]
+    },
+    "muse": {
+      "command": ["pi", "-p", "--no-session", "--no-extensions", "--no-skills", "--no-mcp", "--no-context-files", "--no-prompt-templates", "--no-themes", "--mode", "json", "--model", "meta/muse-spark-1.3-contributor"],
+      "cli": "pi", "via": "pi", "modelId": "meta/muse-spark-1.3-contributor", "publicOnly": true
+    }
+  },
+  "fallback": { "claude": "gemini", "gemini": "muse", "muse": "claude" },
+  "workerRetries": 2,
+  "rejectLimit": 2,
+  "noReportRetries": 2,
+  "sessionRestarts": 1,
+  "ci": { "mergeQueue": "local", "cacheKey": [], "excludeTests": ["smoke", "orchestra"] },
+  "jev": {
+    "endpoint": "https://api.typesafe.ai/v1/systemone",
+    "model": "jev-1.14.0",
+    "timeoutMs": 60000,
+    "yes": 0.7,
+    "no": 0.3,
+    "routing": {
+      "workerModels": {
+        "claude": "A change that needs an understanding of how many files or modules fit together, or that touches configuration, permissions, security, or secrets",
+        "gemini": "A feature change with a clear scope that touches several files",
+        "muse": "A code change confined to one or two files with a clearly stated expected behavior, such as a small bug fix, one new option, or a new test; or documentation and examples"
+      },
+      "difficulty": {
+        "쉬움": "A change that a careful junior developer could make in one sitting from the issue text alone: the files to touch and the expected behavior are named, and no existing design has to be understood first",
+        "어려움": "A change that needs reading how several parts of the code interact before editing, or that has unclear edge cases, concurrency, data migration, or security consequences"
+      },
+      "types": {
+        "작업": "The issue asks for a change to the target project: code, tests, configuration, or documentation",
+        "조사": "The issue asks for an answer or a recommendation, with no change to the target project"
+      }
+    }
+  }
+}

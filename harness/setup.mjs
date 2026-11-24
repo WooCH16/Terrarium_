@@ -1,0 +1,291 @@
+// 실행 폴더를 만든다: node setup.mjs --run <dir> (--repo <owner/name> | --create-repo) [--project <git 폴더>] [--no-clone | --refresh] [--advisor-stub]
+//   --create-repo: 지정 저장소가 없으면 비공개로 만든다(결정 8-28). 이 깃발이 만들기 동의다. --repo가 없으면 <로그인 계정>/harness-issues.
+//                  이미 있으면 만들지 않는다. 공개 저장소를 비공개로 바꾸거나 지우지 않는다. --no-clone·--refresh와 함께 쓸 수 없다
+//   --project: 대상 프로젝트로 쓸 로컬 git 저장소(main 브랜치 필요). 실행 폴더에 복제하고 원래 저장소와의 연결(origin)은 끊는다.
+//              없으면 시험용 메모 프로그램(fixtures/memo)을 쓴다
+//   --no-clone: 지정 저장소에 접속하지 않고 빈 저장소로 클론 자리를 만든다(시험용)
+//   --refresh: 규칙(CLAUDE.md)·에이전트·설정만 다시 쓴다. 클론, 대상 프로젝트, 로그, 기록은 건드리지 않는다
+//   --advisor-stub: advisor 자리에 어드바이저 대역(stubs/advisor-stub.md)을 설치한다(시험용)
+//   --target-repo <owner/name>: 대상 프로젝트의 GitHub 저장소(결정 8-32). harness.json의 targetRepo·targetRemote가 된다. 없으면 로컬 흐름(run-reflect)으로 돈다
+//   --target-remote <주소>: push 주소(기본 https://github.com/<owner/name>.git, 시험은 로컬 bare 저장소)
+//   --add-workflows | --no-workflows: 대상 저장소에 하네스 워크플로 틀(harness/github/workflows/)을 넣을지. 동의하면 브랜치 하나(harness/add-workflows)와
+//                  PR 하나만 만든다(main에는 쓰지 않는다. 머지는 사용자가 한다). 둘 다 없고 터미널이면 묻는다(기본은 넣지 않음). --refresh와 함께 써서 나중에 넣을 수 있다
+//   --test-command <명령>: 기본 CI의 시험 명령(기본 npm test). --ci-workflow <파일.yml>: 대상 저장소의 자기 CI(workflow_call, ref 입력)를 쓴다(기본 CI 파일은 넣지 않는다)
+// 지정 저장소가 PRIVATE가 아니면(--no-clone, --refresh 제외) 아무것도 쓰지 않고 종료 코드 2로 끝난다.
+// --repo가 owner/name 형식이 아니거나, --refresh에서 기존 harness.json의 지정 저장소와 다르면 아무것도 쓰지 않고 종료 코드 1로 끝난다.
+// HARNESS_GH_BIN은 시험용이다(gh 대신 쓸 실행 파일 또는 .mjs 스크립트).
+import { mkdirSync, existsSync, readdirSync, readFileSync, writeFileSync, cpSync } from 'node:fs';
+import { basename, dirname, resolve } from 'node:path';
+import { createInterface } from 'node:readline/promises';
+import { addWorkflowsPr } from './github-workflows.mjs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { ENSURED_LABELS } from './operator/report.mjs';
+import { claudeMdExcludes } from './operator/launch.mjs';
+
+const fwd = (p) => resolve(p).replace(/\\/g, '/');
+const harnessDir = fwd(dirname(fileURLToPath(import.meta.url)));
+const GIT_ID = ['-c', 'user.name=terrarium-harness', '-c', 'user.email=harness@localhost'];
+const PLACEHOLDER = /\{\{[A-Z_]+\}\}/;
+
+function arg(name) {
+  const i = process.argv.indexOf(name);
+  return i === -1 ? undefined : process.argv[i + 1];
+}
+const git = (cwd, ...a) => execFileSync('git', ['-C', cwd, ...a], { stdio: 'pipe', encoding: 'utf8' });
+const stop = (message, code = 2) => { console.error(message); process.exit(code); };
+
+// gh 호출. HARNESS_GH_BIN이 .mjs/.js이면 node로 실행한다.
+function gh(args, options = {}) {
+  const custom = process.env.HARNESS_GH_BIN;
+  const script = custom && /\.(mjs|js)$/i.test(custom);
+  return execFileSync(custom ? (script ? process.execPath : custom) : 'gh', script ? [custom, ...args] : args, { encoding: 'utf8', stdio: 'pipe', timeout: 60000, windowsHide: true, ...options });
+}
+
+const runArg = arg('--run');
+let repo = arg('--repo');
+const noClone = process.argv.includes('--no-clone');
+const refresh = process.argv.includes('--refresh'); // 역할 파일(CLAUDE.md, agents, settings)만 다시 쓴다
+const advisorStub = process.argv.includes('--advisor-stub');
+const createRepo = process.argv.includes('--create-repo'); // 지정 저장소가 없으면 만든다(결정 8-28)
+const projectArg = arg('--project');
+const targetRepoArg = arg('--target-repo');
+const targetRemoteArg = arg('--target-remote');
+const addWorkflows = process.argv.includes('--add-workflows');
+const noWorkflows = process.argv.includes('--no-workflows');
+const testCommand = arg('--test-command') ?? 'npm test';
+const ciWorkflow = arg('--ci-workflow');
+const USAGE = 'usage: node setup.mjs --run <dir> (--repo <owner/name> | --create-repo) [--project <git 폴더>] [--no-clone | --refresh] [--advisor-stub] [--target-repo <owner/name> [--target-remote <주소>] [--add-workflows | --no-workflows] [--test-command <명령>] [--ci-workflow <파일.yml>]]';
+const VALUE_FLAGS = ['--project', '--target-repo', '--target-remote', '--test-command', '--ci-workflow'];
+if (!runArg || VALUE_FLAGS.some((f) => process.argv.includes(f) && (arg(f) === undefined || arg(f).startsWith('--')))) {
+  console.error(USAGE);
+  process.exit(1);
+}
+if (createRepo && (refresh || noClone)) {
+  console.error(USAGE);
+  console.error(`--create-repo는 ${refresh ? '--refresh' : '--no-clone'}와 함께 쓸 수 없다(지정 저장소에 접속하지 않으므로 만들 일이 없다). 아무것도 쓰지 않고 멈춘다.`);
+  process.exit(1);
+}
+// 지정 저장소 이름은 owner/name 한 꼴만 받는다. `--repo undefined`가 harness.json을 덮은 일이 있었다(run-18).
+const REPO_FORMAT = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const validRepo = (v) => typeof v === 'string' && REPO_FORMAT.test(v) && !/\.git$/i.test(v);
+// --create-repo에 --repo가 없으면 로그인 계정의 harness-issues를 쓴다. 이 이름도 아래 형식 검사를 그대로 받는다.
+if (createRepo && !process.argv.includes('--repo')) {
+  let login = '';
+  try { login = gh(['api', 'user', '--jq', '.login']).trim(); } catch (e) { stop(`로그인 계정을 읽지 못해 기본 지정 저장소 이름을 정할 수 없다. --repo <owner/name>을 주거나 gh auth login을 하라. 아무것도 쓰지 않고 멈춘다: ${String(e.message).split('\n')[0]}`); }
+  repo = `${login}/harness-issues`;
+}
+if (!validRepo(repo)) {
+  console.error(USAGE);
+  console.error(`--repo 값 ${repo === undefined ? '(없음)' : JSON.stringify(repo)}은 owner/name 형식이 아니다(영문자·숫자·-_. 만, 빗금 하나, 양쪽 비어 있지 않음, .git 끝 없음). 아무것도 쓰지 않고 멈춘다.`);
+  process.exit(1);
+}
+// 대상 저장소(결정 8-32): owner/name 한 꼴. 주소는 공백·줄바꿈·앞 붙임표가 없어야 한다(git 인자로 넘긴다).
+const usageStop = (why) => { console.error(USAGE); console.error(`${why} 아무것도 쓰지 않고 멈춘다.`); process.exit(1); };
+if (addWorkflows && noWorkflows) usageStop('--add-workflows와 --no-workflows는 함께 쓸 수 없다.');
+if (targetRepoArg !== undefined && !validRepo(targetRepoArg)) usageStop(`--target-repo 값 ${JSON.stringify(targetRepoArg)}은 owner/name 형식이 아니다.`);
+if (targetRemoteArg !== undefined && (targetRepoArg === undefined || /[\s\0]/.test(targetRemoteArg) || targetRemoteArg.startsWith('-'))) usageStop('--target-remote는 --target-repo와 함께, 공백 없는 주소로 준다.');
+if (/['\r\n]/.test(testCommand) || testCommand.length > 200 || testCommand.trim() === '') usageStop('--test-command에는 작은따옴표·줄바꿈을 쓸 수 없다(200자까지).');
+if (ciWorkflow !== undefined && !/^[A-Za-z0-9._-]+\.ya?ml$/.test(ciWorkflow)) usageStop('--ci-workflow는 .github/workflows/ 안의 파일 이름(예: ci.yml)이다.');
+const run = fwd(runArg);
+if (!refresh && existsSync(run) && readdirSync(run).length > 0) {
+  console.error(`실행 폴더가 비어 있지 않다: ${run}`);
+  process.exit(1);
+}
+
+// 대상 프로젝트: --refresh는 기존 harness.json의 값을 쓴다. 이름은 실행 폴더 안의 폴더 이름과 기록 문서 이름이 된다.
+const RESERVED = new Set(['issues', 'worktrees', 'logs', 'handoffs', 'reviewer-inbox', '.claude', 'records']);
+let project = { name: 'memo', source: null };
+let oldTarget = {};
+if (refresh && existsSync(`${run}/harness.json`)) {
+  const old = JSON.parse(readFileSync(`${run}/harness.json`, 'utf8'));
+  // 대상 저장소 칸(결정 8-32)은 --refresh에서도 이어받는다(안 그러면 로컬 흐름으로 바뀌어 버린다). 다른 저장소로 바꾸지 않는다.
+  if (validRepo(old.targetRepo) && typeof old.targetRemote === 'string') oldTarget = { targetRepo: old.targetRepo, targetRemote: old.targetRemote };
+  if (oldTarget.targetRepo && targetRepoArg !== undefined && targetRepoArg !== oldTarget.targetRepo) stop('--target-repo가 실행 폴더 harness.json의 기존 대상 저장소와 다르다. --refresh는 대상 저장소를 바꾸지 않는다. 아무것도 쓰지 않고 멈춘다.', 1);
+  // 다른 저장소로 바꾸는 것은 --refresh의 일이 아니다. 기존 값이 형식부터 틀렸을 때만(망가진 값 고치기) 새 값으로 쓴다.
+  if (validRepo(old.designatedRepo) && old.designatedRepo !== repo) stop('--repo가 실행 폴더 harness.json의 기존 지정 저장소 값과 다르다. --refresh는 지정 저장소를 바꾸지 않는다. 아무것도 쓰지 않고 멈춘다.', 1);
+  if (typeof old.projectName === 'string') project = { name: old.projectName, source: null };
+}
+if (projectArg && refresh) stop('--project는 처음 설치할 때만 쓴다. --refresh는 기존 대상 프로젝트를 그대로 둔다.', 1);
+if (projectArg) {
+  const source = fwd(projectArg);
+  const name = basename(source);
+  if (!existsSync(source)) stop(`대상 프로젝트 폴더가 없다: ${source}`, 1);
+  try { git(source, 'rev-parse', '--verify', '-q', 'refs/heads/main'); } catch { stop(`대상 프로젝트가 git 저장소가 아니거나 main 브랜치가 없다: ${source}`, 1); }
+  if (!/^[A-Za-z0-9._-]+$/.test(name) || /^\.+$/.test(name) || RESERVED.has(name)) stop(`대상 프로젝트 폴더 이름 ${JSON.stringify(name)}은 쓸 수 없다(영문·숫자·.-_만, 예약어 ${[...RESERVED].join(', ')} 제외)`, 1);
+  project = { name, source };
+}
+
+// 1. 아무것도 쓰기 전에 지정 저장소가 비공개인지 확인한다. 확인하지 못해도 막는다(닫힌 쪽).
+//    --create-repo가 있고 gh가 "찾을 수 없다"고 답했을 때만 비공개로 만들고 다시 확인한다(결정 8-28). 다른 실패는 만들지 않고 멈춘다.
+const NOT_FOUND = /Could not resolve to a Repository/i;
+if (!noClone && !refresh) {
+  const view = () => gh(['repo', 'view', repo, '--json', 'visibility', '-q', '.visibility']).trim();
+  let visibility;
+  try {
+    visibility = view();
+  } catch (e) {
+    const why = `${e.stderr ?? ''}\n${e.message ?? ''}`;
+    if (!NOT_FOUND.test(why)) stop(`지정 저장소의 공개 여부를 확인하지 못해 아무것도 쓰지 않고 멈춘다: ${String(e.message).split('\n')[0]}`);
+    if (!createRepo) stop(`지정 저장소 ${repo}가 없다. 아무것도 쓰지 않고 멈춘다. gh repo create ${repo} --private로 만들거나, setup에 --create-repo를 붙이면 비공개로 만들어 준다.`);
+    try { gh(['repo', 'create', repo, '--private']); } catch (e2) { stop(`지정 저장소 ${repo}를 만들지 못해 아무것도 쓰지 않고 멈춘다: ${String(e2.message).split('\n')[0]}`); }
+    console.log(`지정 저장소를 비공개로 만들었다: ${repo}`);
+    try { visibility = view(); } catch (e3) { stop(`만든 지정 저장소의 공개 여부를 확인하지 못해 더 쓰지 않고 멈춘다: ${String(e3.message).split('\n')[0]}`); }
+  }
+  if (visibility !== 'PRIVATE') stop(`지정 저장소 ${repo}가 PRIVATE가 아니다(${JSON.stringify(visibility)}). 아무것도 쓰지 않고 멈춘다. 비공개 저장소를 지정하라.`);
+}
+
+const config = {
+  designatedRepo: repo,
+  issuesClone: `${run}/issues`,
+  targetProject: `${run}/${project.name}`,
+  projectName: project.name,
+  worktrees: `${run}/worktrees`,
+  operatorConfig: `${harnessDir}/operator/operator.config.json`,
+  harnessDir,
+  runDir: run,
+  ...oldTarget,
+  ...(targetRepoArg !== undefined && !oldTarget.targetRepo ? { targetRepo: targetRepoArg, targetRemote: targetRemoteArg ?? `https://github.com/${targetRepoArg}.git` } : {}),
+};
+const fill = (text) => text
+  .replaceAll('{{REPO}}', config.designatedRepo)
+  .replaceAll('{{ISSUES}}', config.issuesClone)
+  .replaceAll('{{MEMO}}', config.targetProject)
+  .replaceAll('{{PROJECT}}', config.projectName)
+  .replaceAll('{{WORKTREES}}', config.worktrees)
+  .replaceAll('{{HARNESS}}', config.harnessDir)
+  .replaceAll('{{RUN}}', run);
+
+// 2. 쓸 규칙·에이전트·설정을 먼저 만들고, 자리표시자가 남았으면 쓰기 전에 멈춘다.
+const roleFiles = new Map();
+roleFiles.set('CLAUDE.md', fill(readFileSync(`${harnessDir}/coordinator/AGENT.md`, 'utf8')));
+// 역할 스킬: 코디네이터 스킬은 실행 폴더의 프로젝트 스킬로 설치해 Skill 도구로 부르고(ADR 0005),
+// 어드바이저 스킬은 같은 곳에 설치한 뒤 하위 에이전트 정의의 skills 칸으로 시작할 때 미리 주입한다(어드바이저에게 Skill 도구는 없다).
+// 오퍼레이터·워커 스킬은 launch.mjs·run-worker.mjs가 지침 글에 붙이고, 리뷰어 스킬은 코드의 절차 문서라 설치하지 않는다.
+const skillNames = (role) => { const d = `${harnessDir}/${role}/skills`; return existsSync(d) ? readdirSync(d).filter((n) => existsSync(`${d}/${n}/SKILL.md`)).sort() : []; };
+const withSkills = (text, names) => names.length === 0 ? text : text.replace(/^(---\r?\n[\s\S]*?)(\r?\n---\r?\n)/, (_, head, end) => `${head}\nskills:\n${names.map((n) => `  - ${n}`).join('\n')}${end}`);
+const advisorSkills = advisorStub ? [] : skillNames('advisor');
+roleFiles.set('.claude/agents/advisor.md', withSkills(fill(readFileSync(advisorStub ? `${harnessDir}/stubs/advisor-stub.md` : `${harnessDir}/advisor/AGENT.md`, 'utf8')), advisorSkills));
+for (const role of ['coordinator', 'advisor']) {
+  if (role === 'advisor' && advisorStub) continue;
+  // SKILL.md 옆의 참고 파일(예: advisor-domain-knowledge/knowledge/*.md)도 같은 자리에 설치한다. 미리 주입되는 것은 SKILL.md뿐이고, 참고 파일은 필요할 때 Read로 읽는다.
+  for (const name of skillNames(role)) {
+    const d = `${harnessDir}/${role}/skills/${name}`;
+    for (const rel of readdirSync(d, { recursive: true }).map((p) => p.replaceAll('\\', '/')).filter((p) => p.endsWith('.md')).sort()) roleFiles.set(`.claude/skills/${name}/${rel}`, fill(readFileSync(`${d}/${rel}`, 'utf8')));
+  }
+}
+roleFiles.set('.claude/settings.json', JSON.stringify({
+  permissions: { allow: ['Bash', 'Write', 'Edit', 'Read', 'Glob', 'Grep', 'Agent', 'TodoWrite', 'Skill'] },
+  hooks: {
+    PreToolUse: [{
+      matcher: '*',
+      hooks: [{ type: 'command', command: `node "${harnessDir}/guard.mjs" --config "${run}/harness.json"` }],
+    }],
+    // 컴팩션이 끝나면 압축 후 검증을 하라는 알림과 보존 노트 경로를 대화에 넣는다(소유자 결정 8-20, run-18).
+    SessionStart: [{
+      matcher: 'compact',
+      hooks: [{ type: 'command', command: `node "${harnessDir}/compact-notice.mjs" --config "${run}/harness.json"` }],
+    }],
+  },
+  // 사용자 전역 CLAUDE.md와 실행 폴더 상위의 CLAUDE.md가 코디네이터 규칙에 섞이지 않게 한다(이슈 #22)
+  claudeMdExcludes: claudeMdExcludes(run),
+  env: { CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '2' },
+}, null, 2));
+roleFiles.set('harness.json', JSON.stringify(config, null, 2));
+for (const [name, text] of roleFiles) {
+  if (PLACEHOLDER.test(text)) stop(`${name}에 채우지 못한 자리표시자가 남아 있어 아무것도 쓰지 않고 멈춘다: ${text.match(PLACEHOLDER)[0]}`);
+}
+
+mkdirSync(`${run}/.claude/agents`, { recursive: true });
+mkdirSync(config.worktrees, { recursive: true });
+mkdirSync(`${run}/logs`, { recursive: true });
+mkdirSync(`${run}/handoffs`, { recursive: true });
+mkdirSync(`${run}/reviewer-inbox`, { recursive: true }); // 리뷰어 전용 폴더(ADR 0006): 어드바이저가 제안문을 쓰고 run-reviewer --advice가 읽는다
+for (const [name, text] of roleFiles) { mkdirSync(dirname(`${run}/${name}`), { recursive: true }); writeFileSync(`${run}/${name}`, text); }
+
+const NEXT = `cd "${run}" && claude --setting-sources project,local --allowedTools "Bash Write Edit Read Glob Grep Agent TodoWrite Skill"`;
+if (refresh) {
+  console.log(`역할 파일 갱신 완료: ${run}`);
+  console.log(`다시 쓴 파일: ${[...roleFiles.keys()].join(', ')}`);
+  await offerWorkflows();
+  console.log(`다음 실행 명령: ${NEXT}`);
+  process.exit(0);
+}
+
+// 대상 프로젝트 저장소: 지정한 저장소의 복제본(원래 저장소에는 쓰지 않는다) 또는 시험용 메모 프로그램
+if (project.source) {
+  execFileSync('git', ['clone', '-q', project.source, config.targetProject], { stdio: 'pipe' });
+  git(config.targetProject, 'checkout', '-q', 'main');
+  git(config.targetProject, 'remote', 'remove', 'origin');
+  git(config.targetProject, 'config', 'user.name', 'terrarium-harness');
+  git(config.targetProject, 'config', 'user.email', 'harness@localhost');
+} else {
+  cpSync(`${harnessDir}/fixtures/memo`, config.targetProject, { recursive: true });
+  writeFileSync(`${config.targetProject}/.gitignore`, 'memos.json\nnode_modules/\n');
+  git(config.targetProject, 'init', '-q', '-b', 'main');
+  git(config.targetProject, 'config', 'user.name', 'terrarium-harness');
+  git(config.targetProject, 'config', 'user.email', 'harness@localhost');
+  git(config.targetProject, 'add', '-A');
+  git(config.targetProject, 'commit', '-q', '-m', 'memo: 초기 버전 (정렬 없음)');
+}
+
+// 지정 저장소 클론
+if (noClone) {
+  mkdirSync(config.issuesClone, { recursive: true });
+  git(config.issuesClone, 'init', '-q', '-b', 'main');
+} else {
+  gh(['repo', 'clone', repo, config.issuesClone]);
+  // 상태 라벨 9개와 취소 라벨(멱등). 이슈를 올릴 때 --label로 붙일 수 있게 미리 만든다.
+  for (const name of ENSURED_LABELS) gh(['label', 'create', name, '--repo', repo, '--force', '--description', `하네스 상태: ${name}`]);
+}
+mkdirSync(`${config.issuesClone}/.drafts`, { recursive: true });
+mkdirSync(`${config.issuesClone}/records`, { recursive: true });
+writeFileSync(`${config.issuesClone}/.gitignore`, '.drafts/\n');
+writeFileSync(`${config.issuesClone}/advisors.md`, [
+  '# 어드바이저 목록',
+  '',
+  '| 이름 (하위 에이전트) | 아는 영역 | 담당 범위 | 연결된 오퍼레이터 |',
+  '|---|---|---|---|',
+  project.source
+    ? `| advisor | ${project.name} | 대상 프로젝트(\`${project.name}/\`) 전체 | operator |`
+    : '| advisor | memo | 메모 프로그램(`memo/`)의 기능, 명령줄, 저장 방식, 테스트 | operator |',
+  '',
+].join('\n'));
+if (!existsSync(`${config.issuesClone}/records/${project.name}.md`)) {
+  writeFileSync(`${config.issuesClone}/records/${project.name}.md`, `# 기록 문서: ${project.name}\n\n`);
+}
+git(config.issuesClone, 'add', '-A');
+if (git(config.issuesClone, 'status', '--porcelain').trim()) { // 이미 올라가 있으면 커밋할 것이 없다
+  git(config.issuesClone, ...GIT_ID, 'commit', '-q', '-m', 'harness: 초기 문서 (어드바이저 목록, 기록 문서)');
+  if (!noClone) git(config.issuesClone, 'push', '-q', 'origin', 'HEAD');
+}
+
+await offerWorkflows();
+console.log(`실행 폴더 준비 완료: ${run}`);
+console.log('만든 것:');
+for (const f of [...roleFiles.keys(), 'worktrees/', 'logs/', 'handoffs/', 'reviewer-inbox/', `${project.name}/ (대상 프로젝트, git 저장소${project.source ? `, ${project.source}의 복제본` : ''})`, `issues/ (지정 저장소 ${noClone ? '대신 빈 저장소' : '클론'}), advisors.md, records/${project.name}.md`]) console.log(`  ${f}`);
+console.log(`다음 실행 명령: ${NEXT}`);
+
+// ---- 워크플로 틀 넣기(결정 8-32 새 결정 3) ----
+// 동의(--add-workflows 또는 터미널 질문에 y)하면 대상 저장소에 브랜치 하나와 PR 하나만 만든다(github-workflows.mjs). main에는 쓰지 않는다.
+// 거절했거나 대상 저장소가 없으면 아무것도 쓰지 않고 로컬 흐름을 안내한다. 이 단계의 실패는 설치를 되돌리지 않는다.
+async function offerWorkflows() {
+  const local = '로컬 흐름(run-reflect)으로 돌고 끝 보고에 "CI 없음"을 적는다.';
+  if (!config.targetRepo) {
+    if (addWorkflows) console.log(`워크플로: 대상 저장소(--target-repo)가 없어 넣지 않았다. ${local}`);
+    return;
+  }
+  let yes = addWorkflows;
+  if (!addWorkflows && !noWorkflows && process.stdin.isTTY) {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const a = await rl.question(`대상 저장소 ${config.targetRepo}에 하네스 워크플로 틀(이슈 PR, 하달 PR, 머지 트레인, 기본 CI)을 PR 하나로 넣을까요? main에는 쓰지 않고 머지는 직접 합니다. [y/N] `);
+    rl.close();
+    yes = /^(y|yes|예|네)$/i.test(a.trim());
+  }
+  if (!yes) {
+    console.log(`워크플로: 넣지 않았다. 대상 저장소에는 아무것도 쓰지 않았다. ${local} 나중에 넣으려면 setup.mjs --refresh --add-workflows`);
+    return;
+  }
+  const r = addWorkflowsPr({ target: { repo: config.targetRepo, remote: config.targetRemote }, designatedRepo: config.designatedRepo, testCommand, ciWorkflow, gh });
+  console.log(`워크플로: ${r.message}. ${r.written ? 'PR을 머지하기 전까지는 ' : ''}${r.ok && !r.written ? '' : local}`.trim());
+}

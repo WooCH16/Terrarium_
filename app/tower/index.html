@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:">
+<title>Terrarium</title>
+<link rel="stylesheet" href="../node_modules/@fontsource/jetbrains-mono/400.css">
+<link rel="stylesheet" href="../node_modules/@fontsource/jetbrains-mono/700.css">
+<style>
+html,body{height:100%}
+body{margin:0;background:#0e0d0b}
+/* 흰 제목 표시줄 대신: 위쪽 32px는 창을 끄는 자리(오른쪽에 창 단추), 화면은 그 아래. main.js TITLE_H */
+#tb{position:fixed;left:0;right:0;top:0;height:32px;-webkit-app-region:drag}
+#root{position:fixed;left:0;right:0;top:32px;bottom:0}
+a{color:#8a877f}a:hover{color:#c9c6bd}
+#cmd::placeholder{color:#8a877f}
+nav svg,nav button>button,[role=toolbar] svg,[role=toolbar] button[aria-label]{flex-shrink:0}
+.flow{stroke-dasharray:6 10;animation:flow 0.9s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-16}}
+@media (prefers-reduced-motion: reduce){.flow{animation:none}}
+</style>
+</head>
+<body>
+<div id="tb"></div>
+<div id="root"></div>
+<script type="text/x-template" id="screen">
+<div style="position: relative; width: 100%; height: 100%; min-height: 480px; background: {{background}}; overflow: hidden">
+<canvas ref="{{ setCanvas }}" aria-hidden="true" style="position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: {{bgCursor}}"></canvas>
+<div style="position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform: {{stageTransform}}; transform-origin: 0 0">
+<svg width="1" height="1" aria-hidden="true" style="position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none">
+<path d="{{geo.pAdv}}" fill="none" stroke="#a78bfa" stroke-opacity="0.3" stroke-width="1.5" style="opacity: {{linkOp.adv}}; transition: opacity 0.4s"></path>
+<path class="flow" d="{{geo.pAdv}}" fill="none" stroke="#a78bfa" stroke-width="1.5" style="opacity: {{linkOp.adv}}; transition: opacity 0.4s"></path>
+<path d="{{geo.pOps}}" fill="none" stroke="#6cb6ff" stroke-opacity="0.3" stroke-width="1.5" style="opacity: {{linkOp.ops}}; transition: opacity 0.4s"></path>
+<path class="flow" d="{{geo.pOps}}" fill="none" stroke="#6cb6ff" stroke-width="1.5" style="opacity: {{linkOp.ops}}; transition: opacity 0.4s"></path>
+<path d="{{geo.tAdv}}" fill="none" stroke="#a78bfa" stroke-width="2.5" style="opacity: {{jevA.trunk}}; transition: opacity 0.3s"></path>
+<path class="flow" d="{{geo.tAdv}}" fill="none" stroke="#ffffff" stroke-width="1.5" style="opacity: {{jevA.trunk}}; transition: opacity 0.3s"></path>
+<path d="{{geo.tOps}}" fill="none" stroke="#6cb6ff" stroke-width="2.5" style="opacity: {{jevO.trunk}}; transition: opacity 0.3s"></path>
+<path class="flow" d="{{geo.tOps}}" fill="none" stroke="#ffffff" stroke-width="1.5" style="opacity: {{jevO.trunk}}; transition: opacity 0.3s"></path>
+<path d="{{geo.pWork}}" fill="none" stroke="#5fd0b5" stroke-opacity="0.3" stroke-width="1.5" style="opacity: {{linkOp.work}}; transition: opacity 0.4s"></path>
+<path class="flow" d="{{geo.pWork}}" fill="none" stroke="#5fd0b5" stroke-width="1.5" style="opacity: {{linkOp.work}}; transition: opacity 0.4s"></path>
+</svg>
+<div role="img" aria-label="JEV {{jevA.label}}" style="position: absolute; left: {{jevA.x}}px; top: {{jevA.y}}px; width: 46px; height: 46px; box-sizing: border-box; transform: translate(-50%, -50%) scale({{jevA.sc}}); opacity: {{jevA.op}}; transition: opacity 0.35s, transform 0.3s, box-shadow 0.3s, border-color 0.3s, color 0.3s; z-index: 2; pointer-events: none; border-radius: 50%; background: #181715; border: 1.5px solid {{jevA.bc}}; box-shadow: {{jevA.glow}}; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; color: {{jevA.c}}">
+<svg width="14" height="10" viewBox="0 0 24 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate({{jevA.rot}}deg)"><path d="M2 2c6 0 8 6 10 6M2 14c6 0 8-6 10-6M12 8h10M18 4l4 4-4 4"></path></svg>
+<span>JEV</span>
+</div>
+<div role="img" aria-label="JEV {{jevO.label}}" style="position: absolute; left: {{jevO.x}}px; top: {{jevO.y}}px; width: 46px; height: 46px; box-sizing: border-box; transform: translate(-50%, -50%) scale({{jevO.sc}}); opacity: {{jevO.op}}; transition: opacity 0.35s, transform 0.3s, box-shadow 0.3s, border-color 0.3s, color 0.3s; z-index: 2; pointer-events: none; border-radius: 50%; background: #181715; border: 1.5px solid {{jevO.bc}}; box-shadow: {{jevO.glow}}; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; color: {{jevO.c}}">
+<svg width="14" height="10" viewBox="0 0 24 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate({{jevO.rot}}deg)"><path d="M2 2c6 0 8 6 10 6M2 14c6 0 8-6 10-6M12 8h10M18 4l4 4-4 4"></path></svg>
+<span>JEV</span>
+</div>
+<sc-for list="{{groupLabels}}" as="g" hint-placeholder-count="0">
+<p style="position: absolute; left: {{g.x}}px; top: {{g.y}}px; margin: 0; font-family: Inter, system-ui, sans-serif; font-size: 12px; font-weight: 700; letter-spacing: 0.14em; color: {{g.c}}; white-space: nowrap; pointer-events: none; opacity: {{g.op}}; transition: opacity 0.4s">{{g.t}}</p>
+</sc-for>
+<sc-for list="{{nodes}}" as="n" hint-placeholder-count="0">
+<div aria-label="{{n.label}}" onPointerDown="{{ n.tap }}" style="position: absolute; left: {{n.x}}px; top: {{n.y}}px; width: {{n.w}}px; height: {{n.h}}px; box-sizing: border-box; transform: translate(-50%, -50%) scale({{n.sc}}); opacity: {{n.op}}; z-index: {{n.z}}; transition: opacity 0.35s ease, transform 0.35s ease; pointer-events: {{n.pe}}; display: flex; flex-direction: column; background: #181715; border: 1px solid {{n.border}}; border-radius: 10px; box-shadow: 0 16px 48px rgba(0,0,0,0.55); overflow: hidden; font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5; color: #e8e6e1">
+<div onPointerDown="{{ n.grab }}" onPointerMove="{{ n.move }}" onPointerUp="{{ n.end }}" onPointerCancel="{{ n.end }}" style="flex-shrink: 0; cursor: {{n.cur}}; user-select: none; touch-action: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; background: #1d1c1a; border-bottom: 1px solid #2a2926; font-family: Inter, system-ui, sans-serif; font-size: 11px">
+<span style="display: flex; align-items: center; gap: 6px"><span style="width: 7px; height: 7px; border-radius: 50%; background: {{n.color}}"></span><span style="font-weight: 600">{{n.label}}</span></span>
+<span style="padding: 1px 6px; border: 1px solid {{n.stColor}}; border-radius: 6px; color: {{n.stColor}}; font-size: 9px; letter-spacing: 0.08em">{{n.status}}</span>
+</div>
+<div style="padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow: hidden">
+<span style="color: #8a877f">↳ from {{n.parent}}</span>
+<span style="color: #e8e6e1; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical">{{n.msg}}</span>
+<span style="color: {{n.color}}">{{n.activity}}</span>
+</div>
+<div onPointerDown="{{ n.rs.n }}" onPointerMove="{{ n.move }}" onPointerUp="{{ n.end }}" onPointerCancel="{{ n.end }}" style="position: absolute; left: 10px; right: 10px; top: 0; height: 5px; cursor: ns-resize; touch-action: none; z-index: 2"></div>
+<div onPointerDown="{{ n.rs.s }}" onPointerMove="{{ n.move }}" onPointerUp="{{ n.end }}" onPointerCancel="{{ n.end }}" style="position: absolute; left: 10px; right: 10px; bottom: 0; height: 6px; cursor: ns-resize; touch-action: none; z-index: 2"></div>
+<div onPointerDown="{{ n.rs.w }}" onPointerMove="{{ n.move }}" onPointerUp="{{ n.end }}" onPointerCancel="{{ n.end }}" style="position: absolute; top: 10px; bottom: 10px; left: 0; width: 6px; cursor: ew-resize; touch-action: none; z-index: 2"></div>
+<div onPointerDown="{{ n.rs.e }}" onPointerMove="{{ n.move }}" onPointerUp="{{ n.end }}" onPointerCancel="{{ n.end }}" style="position: absolute; top: 10px; bottom: 10px; right: 0; width: 6px; cursor: ew-resize; touch-action: none; z-index: 2"></div>
+<div onPointerDown="{{ n.rs.nw }}" onPointerMove="{{ n.move }}" onPointerUp="{{ n.end }}" onPointerCancel="{{ n.end }}" style="position: absolute; left: 0; top: 0; width: 12px; height: 12px; cursor: nwse-resize; touch-action: none; z-index: 3"></div>
+<div onPointerDown="{{ n.rs.ne }}" onPointerMove="{{ n.move }}" onPointerUp="{{ n.end }}" onPointerCancel="{{ n.end }}" style="position: absolute; right: 0; top: 0; width: 12px; height: 12px; cursor: nesw-resize; touch-action: none; z-index: 3"></div>
+<div onPointerDown="{{ n.rs.sw }}" onPointerMove="{{ n.move }}" onPointerUp="{{ n.end }}" onPointerCancel="{{ n.end }}" style="position: absolute; left: 0; bottom: 0; width: 12px; height: 12px; cursor: nesw-resize; touch-action: none; z-index: 3"></div>
+<div onPointerDown="{{ n.rs.se }}" onPointerMove="{{ n.move }}" onPointerUp="{{ n.end }}" onPointerCancel="{{ n.end }}" style="position: absolute; right: 0; bottom: 0; width: 12px; height: 12px; cursor: nwse-resize; touch-action: none; z-index: 3"></div>
+</div>
+</sc-for>
+<sc-for list="{{opPanels}}" as="P" hint-placeholder-count="0">
+<div role="dialog" aria-label="{{P.title}} workers" style="position: absolute; left: {{P.x}}px; top: {{P.y}}px; width: {{P.w}}px; transform: translateX(-50%); z-index: 6; box-sizing: border-box; padding: 12px 12px 10px; background: #161513; border: 1px solid #2e2d2a; border-radius: 14px; box-shadow: 0 18px 48px rgba(0,0,0,0.6); font-family: Inter, system-ui, sans-serif; color: #e8e6e1">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 4px 6px">
+<span style="display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; color: #c9c6bd"><span style="width: 7px; height: 7px; border-radius: 50%; background: #6cb6ff"></span>{{P.title}}</span>
+<span style="display: flex; align-items: center; gap: 8px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #8a877f">{{P.count}}</span>
+<button type="button" aria-label="목록 닫기" onClick="{{ P.close }}" style="display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; background: transparent; border: 0; border-radius: 6px; color: #8a877f; cursor: pointer"><svg width="11" height="11" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+</span>
+</div>
+<sc-for list="{{P.rows}}" as="w" hint-placeholder-count="3">
+<div style="display: flex; align-items: center; gap: 12px; padding: 8px 4px">
+<span role="img" aria-label="{{w.model}} 모델" title="모델은 하네스 라우팅(Jev)이 정합니다" style="position: relative; flex-shrink: 0; width: 36px; height: 36px; border-radius: 9px; background: {{w.bg}}; display: flex; align-items: center; justify-content: center">
+<sc-if value="{{w.isCodex}}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8l4 4-4 4M12 16h7"></path></svg></sc-if><sc-if value="{{w.isGemini}}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c.8 4.6 4.4 8.2 9 9-4.6.8-8.2 4.4-9 9-.8-4.6-4.4-8.2-9-9 4.6-.8 8.2-4.4 9-9z" fill="#ffffff"></path></svg></sc-if><sc-if value="{{w.isMuse}}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round"><path d="M3 12c2-4.5 4-4.5 6 0s4 4.5 6 0 4-4.5 6 0"></path></svg></sc-if><sc-if value="{{w.isClaude}}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6L5.6 18.4"></path></svg></sc-if>
+<span style="position: absolute; right: -3px; bottom: -3px; width: 9px; height: 9px; border-radius: 50%; background: {{w.pillC}}; border: 2px solid #161513"></span>
+</span>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column">
+<span style="font-size: 15px; font-weight: 600; color: #f3f1ec">{{w.model}}</span>
+<span style="font-size: 12px; color: #8a877f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{w.sub}}</span>
+</div>
+<span style="flex-shrink: 0; display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: {{w.pillBg}}; color: {{w.pillC}}; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px"><span style="width: 6px; height: 6px; border-radius: 50%; background: {{w.pillC}}"></span>{{w.status}}</span>
+</div>
+</sc-for>
+<div style="margin-top: 6px; padding: 8px 4px 0; border-top: 1px solid #262522; font-size: 11px; color: #8a877f">{{P.note}}</div>
+</div>
+</sc-for>
+<div role="group" aria-label="Claude Code terminal session" style="position: absolute; left: {{winDx}}px; top: {{winDy}}px; width: {{winW}}px; height: {{winH}}px; transform: translate(-50%, -50%); box-sizing: border-box; display: flex; flex-direction: column; background: #181715; border: 1px solid rgba(217,119,87,0.55); border-radius: 12px; box-shadow: 0 24px 80px rgba(0,0,0,0.6); overflow: hidden; font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace; font-size: 14px; line-height: 1.5; color: #e8e6e1">
+<div onPointerDown="{{ grabBar }}" onPointerMove="{{ dragMove }}" onPointerUp="{{ dragEnd }}" onPointerCancel="{{ dragEnd }}" style="flex-shrink: 0; cursor: {{barCursor}}; user-select: none; touch-action: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid #2a2926; background: #1d1c1a; font-family: Inter, system-ui, sans-serif; font-size: 12px">
+<div style="display: flex; align-items: center; gap: 8px">
+<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#d97757" stroke-width="2.4" stroke-linecap="round"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6L5.6 18.4"></path></svg>
+<svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#8a877f" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+<span style="width: 8px; height: 8px; border-radius: 50%; background: #a78bfa"></span>
+<span style="font-weight: 600; color: #e8e6e1">{{co.user}}</span>
+<span style="color: #8a877f; font-weight: 400">{{co.sub}}</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; color: #8a877f">
+<span style="display: flex; align-items: center; gap: 5px; padding: 2px 8px; border: 1px solid #3a3935; border-radius: 6px; font-size: 10px; letter-spacing: 0.08em; color: {{coordColor}}"><span style="width: 6px; height: 6px; border-radius: 50%; background: {{coordColor}}"></span>{{coordSt}}</span>
+</div>
+</div>
+<div style="flex: 1; min-height: 0; position: relative; overflow: hidden; background: #0e0d0b">
+<div id="term" ref="{{ setTermHost }}" style="position: absolute; left: 0; top: 0; width: {{termPct}}%; height: {{termPct}}%; transform: scale({{termInv}}); transform-origin: 0 0; box-sizing: border-box; padding: 6px 4px 2px 10px"></div>
+</div>
+<div aria-live="polite" title="{{lastLog.t}}" style="flex-shrink: 0; padding: 6px 12px 8px; border-top: 1px solid #2a2926; font-size: 12px; color: {{lastLog.c}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{lastLog.t}}</div>
+<div onPointerDown="{{ rs.n }}" onPointerMove="{{ dragMove }}" onPointerUp="{{ dragEnd }}" onPointerCancel="{{ dragEnd }}" style="position: absolute; left: 10px; right: 10px; top: 0; height: 6px; cursor: ns-resize; touch-action: none; z-index: 2"></div>
+<div onPointerDown="{{ rs.s }}" onPointerMove="{{ dragMove }}" onPointerUp="{{ dragEnd }}" onPointerCancel="{{ dragEnd }}" style="position: absolute; left: 10px; right: 10px; bottom: 0; height: 6px; cursor: ns-resize; touch-action: none; z-index: 2"></div>
+<div onPointerDown="{{ rs.w }}" onPointerMove="{{ dragMove }}" onPointerUp="{{ dragEnd }}" onPointerCancel="{{ dragEnd }}" style="position: absolute; top: 10px; bottom: 10px; left: 0; width: 6px; cursor: ew-resize; touch-action: none; z-index: 2"></div>
+<div onPointerDown="{{ rs.e }}" onPointerMove="{{ dragMove }}" onPointerUp="{{ dragEnd }}" onPointerCancel="{{ dragEnd }}" style="position: absolute; top: 10px; bottom: 10px; right: 0; width: 6px; cursor: ew-resize; touch-action: none; z-index: 2"></div>
+<div onPointerDown="{{ rs.nw }}" onPointerMove="{{ dragMove }}" onPointerUp="{{ dragEnd }}" onPointerCancel="{{ dragEnd }}" style="position: absolute; left: 0; top: 0; width: 12px; height: 12px; cursor: nwse-resize; touch-action: none; z-index: 3"></div>
+<div onPointerDown="{{ rs.ne }}" onPointerMove="{{ dragMove }}" onPointerUp="{{ dragEnd }}" onPointerCancel="{{ dragEnd }}" style="position: absolute; right: 0; top: 0; width: 12px; height: 12px; cursor: nesw-resize; touch-action: none; z-index: 3"></div>
+<div onPointerDown="{{ rs.sw }}" onPointerMove="{{ dragMove }}" onPointerUp="{{ dragEnd }}" onPointerCancel="{{ dragEnd }}" style="position: absolute; left: 0; bottom: 0; width: 12px; height: 12px; cursor: nesw-resize; touch-action: none; z-index: 3"></div>
+<div onPointerDown="{{ rs.se }}" onPointerMove="{{ dragMove }}" onPointerUp="{{ dragEnd }}" onPointerCancel="{{ dragEnd }}" style="position: absolute; right: 0; bottom: 0; width: 12px; height: 12px; cursor: nwse-resize; touch-action: none; z-index: 3"></div>
+</div>
+</div>
+<nav aria-label="Workspace" style="position: absolute; left: {{lpX}}px; top: {{lpY}}px; z-index: 10; font-family: Inter, system-ui, sans-serif; font-size: 12px; color: #c9c6bd; display: flex; flex-direction: row; flex-wrap: wrap; align-items: stretch; gap: 6px; width: {{lpW}}px; max-width: calc(100vw - 24px); box-sizing: border-box; overflow: hidden; padding: 0 6px 6px; background: transparent; border: 1px solid transparent; border-radius: 12px">
+<div onPointerDown="{{ panelGrab }}" onPointerMove="{{ dragMove }}" onPointerUp="{{ dragEnd }}" onPointerCancel="{{ dragEnd }}" title="드래그해서 이동" style="flex: 1 0 100%; height: 14px; display: flex; align-items: center; justify-content: center; cursor: {{panelCursor}}; touch-action: none; user-select: none"><span style="width: 28px; height: 3px; border-radius: 2px; background: #4a4844"></span></div>
+<div onPointerDown="{{ panelRs }}" onPointerMove="{{ dragMove }}" onPointerUp="{{ dragEnd }}" onPointerCancel="{{ dragEnd }}" style="position: absolute; right: 0; top: 0; bottom: 0; width: 6px; cursor: ew-resize; touch-action: none; z-index: 2"></div>
+<button type="button" onClick="{{ goHome }}" title="화면 위치·확대와 코디네이터 창을 처음대로" style="flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; min-height: 32px; padding: 6px 12px; box-sizing: border-box; text-align: left; overflow-wrap: anywhere; background: transparent; border: 1px solid #2e2d2a; border-radius: 8px; color: #c9c6bd; font: inherit; cursor: pointer"><svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg>처음 화면</button>
+<button type="button" title="{{folderPath}}" aria-haspopup="dialog" onClick="{{ toggleFolder }}" style="flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; min-height: 32px; padding: 6px 10px; box-sizing: border-box; text-align: left; overflow-wrap: anywhere; background: #1b1a18; border: 1px solid #2e2d2a; border-radius: 8px; color: #e8e6e1; font: inherit; cursor: pointer"><svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#a8a59c" stroke-width="2" stroke-linejoin="round"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>{{folder}}<svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#8a877f" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></button>
+<sc-for list="{{wsTabs}}" as="t" hint-placeholder-count="1">
+<span style="flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 4px; min-height: 32px; padding: 0 4px 0 0; box-sizing: border-box; background: {{t.bg}}; border: 1px solid {{t.bc}}; border-radius: 8px; color: {{t.c}}; font-weight: 600">
+<button type="button" onClick="{{ t.select }}" aria-pressed="{{t.pressed}}" style="flex: 1; min-width: 0; min-height: 30px; padding: 4px 6px 4px 12px; text-align: left; overflow-wrap: anywhere; background: transparent; border: 0; color: inherit; font: inherit; cursor: pointer">{{t.name}}</button>
+<button type="button" aria-label="{{t.name}} 닫기" onClick="{{ t.close }}" style="display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; background: transparent; border: 0; border-radius: 4px; color: {{t.xc}}; cursor: pointer"><svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+</span>
+</sc-for>
+<button type="button" aria-label="실행 폴더 탭 추가" title="실행 폴더 탭 추가" onClick="{{ addWs }}" style="flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; background: transparent; border: 0; border-radius: 8px; color: #a8a59c; cursor: pointer"><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg></button></nav>
+<div role="toolbar" aria-label="Status" style="position: absolute; right: {{rpR}}px; top: {{rpY}}px; z-index: 10; font-family: Inter, system-ui, sans-serif; font-size: 12px; color: #c9c6bd; display: flex; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-items: stretch; gap: 6px; width: {{rpW}}px; max-width: calc(100vw - 24px); box-sizing: border-box; overflow: hidden; padding: 0 6px 6px; background: transparent; border: 1px solid transparent; border-radius: 12px">
+<div onPointerDown="{{ rpGrab }}" onPointerMove="{{ dragMove }}" onPointerUp="{{ dragEnd }}" onPointerCancel="{{ dragEnd }}" title="드래그해서 이동" style="flex: 1 0 100%; height: 14px; display: flex; align-items: center; justify-content: center; cursor: {{rpCursor}}; touch-action: none; user-select: none"><span style="width: 28px; height: 3px; border-radius: 2px; background: #4a4844"></span></div>
+<div onPointerDown="{{ rpRs }}" onPointerMove="{{ dragMove }}" onPointerUp="{{ dragEnd }}" onPointerCancel="{{ dragEnd }}" style="position: absolute; left: 0; top: 0; bottom: 0; width: 6px; cursor: ew-resize; touch-action: none; z-index: 2"></div>
+<span style="flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 4px 10px; box-sizing: border-box; overflow-wrap: anywhere; border: 1px solid #2e2d2a; border-radius: 14px; color: #c9c6bd"><span style="width: 7px; height: 7px; border-radius: 50%; background: {{liveDot}}"></span>{{liveCount}} live</span>
+<span aria-label="현재 시간" style="flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 4px 10px; box-sizing: border-box; overflow-wrap: anywhere; border: 1px solid #2e2d2a; border-radius: 14px; font-family: 'JetBrains Mono', ui-monospace, monospace; color: #e8e6e1"><svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#a8a59c" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>{{clock}}</span>
+<button type="button" aria-label="사용량·한도" aria-haspopup="dialog" onClick="{{ toggleLimits }}" title="{{usageTop.title}}" style="flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-height: 28px; padding: 4px 10px; box-sizing: border-box; text-align: left; overflow-wrap: anywhere; background: transparent; border: 1px solid #2e2d2a; border-radius: 14px; color: #a8a59c; font: inherit; cursor: pointer"><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="#3a3935" stroke-width="3"></circle><circle cx="12" cy="12" r="9" fill="none" stroke="#f07a73" stroke-width="3" stroke-dasharray="{{usageTop.dash}}" transform="rotate(-90 12 12)"></circle></svg><span style="color: #e8e6e1">{{usageTop.pct}}%</span>{{usageTop.resetText}}</button><button type="button" aria-label="Settings" aria-haspopup="dialog" onClick="{{ toggleSettings }}" style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; background: transparent; border: 0; border-radius: 8px; color: #a8a59c; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></button>
+</div>
+<sc-if value="{{pop.folder}}" hint-placeholder-val="{{ false }}">
+<div role="dialog" aria-label="실행 폴더" style="position: absolute; left: {{popL}}px; top: {{lpY}}px; z-index: 20; width: 280px; max-width: calc(100vw - 24px); box-sizing: border-box; padding: 12px; background: #161513; border: 1px solid #2e2d2a; border-radius: 14px; box-shadow: 0 18px 48px rgba(0,0,0,0.6); font-family: Inter, system-ui, sans-serif; font-size: 12px; color: #e8e6e1">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px"><span style="font-size: 13px; font-weight: 700">실행 폴더</span><button type="button" aria-label="닫기" onClick="{{ closePop }}" style="display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; background: transparent; border: 0; border-radius: 6px; color: #8a877f; cursor: pointer"><svg width="11" height="11" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div>
+<sc-for list="{{folders}}" as="f" hint-placeholder-count="5">
+<button type="button" onClick="{{ f.pick }}" style="width: 100%; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 8px; box-sizing: border-box; background: {{f.bg}}; border: 0; border-radius: 8px; color: #e8e6e1; font: inherit; text-align: left; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#a8a59c" stroke-width="2" stroke-linejoin="round"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg><span style="flex: 1; min-width: 0; display: flex; flex-direction: column"><span style="font-weight: 600">{{f.name}}</span><span style="font-size: 11px; color: #8a877f; overflow-wrap: anywhere">{{f.path}}</span></span><sc-if value="{{f.current}}" hint-placeholder-val="{{ false }}"><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#f0835f" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg></sc-if></button>
+</sc-for>
+<button type="button" onClick="{{ browseFolder }}" style="width: 100%; margin-top: 6px; min-height: 36px; background: transparent; border: 1px dashed #3a3935; border-radius: 8px; color: #a8a59c; font: inherit; cursor: pointer">다른 폴더 열기…</button>
+<div style="margin-top: 8px; font-size: 11px; color: #8a877f">{{folderNote}}</div>
+</div>
+</sc-if>
+<sc-if value="{{pop.settings}}" hint-placeholder-val="{{ false }}">
+<div role="dialog" aria-label="설정" style="position: absolute; right: {{popR}}px; top: {{rpY}}px; z-index: 20; width: 300px; max-width: calc(100vw - 24px); box-sizing: border-box; padding: 12px; background: #161513; border: 1px solid #2e2d2a; border-radius: 14px; box-shadow: 0 18px 48px rgba(0,0,0,0.6); font-family: Inter, system-ui, sans-serif; font-size: 12px; color: #e8e6e1">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px"><span style="font-size: 13px; font-weight: 700">설정</span><button type="button" aria-label="닫기" onClick="{{ closePop }}" style="display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; background: transparent; border: 0; border-radius: 6px; color: #8a877f; cursor: pointer"><svg width="11" height="11" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div>
+<div style="font-size: 11px; font-weight: 700; letter-spacing: 0.1em; color: #8a877f; margin: 4px 0 2px">사용량</div>
+<sc-for list="{{usageRows}}" as="u"><div style="display: flex; flex-direction: column; gap: 4px; padding: 6px 0"><div style="display: flex; justify-content: space-between; gap: 8px"><span>{{u.label}}</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; color: #c9c6bd">{{u.pct}}%</span></div><div style="height: 6px; border-radius: 3px; background: #2a2926; overflow: hidden"><div style="width: {{u.pct}}%; height: 100%; border-radius: 3px; background: {{u.color}}"></div></div><span style="font-size: 11px; color: #8a877f">{{u.resetText}}</span></div></sc-for>
+<div style="font-size: 11px; font-weight: 700; letter-spacing: 0.1em; color: #8a877f; margin: 10px 0 2px">하네스</div>
+<div style="display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid #23221f"><span style="color: #8a877f">지정 저장소</span><span style="text-align: right; overflow-wrap: anywhere">{{account.repo}}</span></div><div style="display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid #23221f"><span style="color: #8a877f">코디네이터 모델</span><span style="text-align: right; overflow-wrap: anywhere">{{co.model}}</span></div><div style="display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid #23221f"><span style="color: #8a877f">활성 세션</span><span style="text-align: right; overflow-wrap: anywhere">{{liveCount}}개</span></div><div style="display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid #23221f"><span style="color: #8a877f">열린 실행 폴더 탭</span><span style="text-align: right; overflow-wrap: anywhere">{{wsCount}}개</span></div><div style="display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid #23221f"><span style="color: #8a877f">사전 점검</span><span style="text-align: right; overflow-wrap: anywhere">{{account.preflight}}</span></div>
+<div style="margin-top: 8px; font-size: 11px; color: #8a877f">{{usageNote}}</div>
+<button type="button" onClick="{{ openSettings }}" style="width: 100%; margin-top: 10px; min-height: 36px; background: #1d1c1a; border: 1px solid #2e2d2a; border-radius: 8px; color: #e8e6e1; font: inherit; cursor: pointer">설정 열기 · 계정 · 설치 · 진행 기록</button>
+</div>
+</sc-if>
+<sc-if value="{{pop.limits}}" hint-placeholder-val="{{ false }}">
+<div role="dialog" aria-label="한도" style="position: absolute; right: {{popR}}px; top: {{rpY}}px; z-index: 20; width: 320px; max-width: calc(100vw - 24px); max-height: calc(100% - 24px); overflow-y: auto; box-sizing: border-box; padding: 12px; background: #161513; border: 1px solid #2e2d2a; border-radius: 14px; box-shadow: 0 18px 48px rgba(0,0,0,0.6); font-family: Inter, system-ui, sans-serif; font-size: 12px; color: #e8e6e1">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px"><span style="font-size: 13px; font-weight: 700">계정별 한도</span><button type="button" aria-label="닫기" onClick="{{ closePop }}" style="display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; background: transparent; border: 0; border-radius: 6px; color: #8a877f; cursor: pointer"><svg width="11" height="11" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div>
+<sc-if value="{{limitsLoading}}" hint-placeholder-val="{{ false }}"><div style="padding: 8px 0; color: #8a877f">읽는 중…</div></sc-if>
+<sc-for list="{{limitRows}}" as="r" hint-placeholder-count="6"><div style="display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px solid #23221f"><div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><span style="min-width: 0; overflow-wrap: anywhere"><span style="font-weight: 600">{{r.name}}</span> <span style="color: #8a877f">{{r.role}}</span></span><span style="flex-shrink: 0; display: flex; align-items: center; gap: 5px; color: {{r.stateColor}}"><span style="width: 6px; height: 6px; border-radius: 50%; background: {{r.stateColor}}"></span>{{r.state}}</span></div><sc-for list="{{r.meters}}" as="m" hint-placeholder-count="2"><div style="display: flex; flex-direction: column; gap: 3px"><div style="display: flex; justify-content: space-between; gap: 8px"><span>{{m.label}}</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; color: #c9c6bd">{{m.pct}}%</span></div><div style="height: 6px; border-radius: 3px; background: #2a2926; overflow: hidden"><div style="width: {{m.pct}}%; height: 100%; border-radius: 3px; background: {{m.color}}"></div></div><span style="font-size: 11px; color: #8a877f">{{m.sub}}</span></div></sc-for><sc-if value="{{r.hasNote}}" hint-placeholder-val="{{ true }}"><span style="font-size: 11px; color: #8a877f; overflow-wrap: anywhere">{{r.note}}</span></sc-if></div></sc-for>
+</div>
+</sc-if>
+<sc-if value="{{upd.show}}" hint-placeholder-val="{{ false }}">
+<div role="status" aria-label="업데이트" style="position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 15; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; max-width: calc(100vw - 32px); box-sizing: border-box; padding: 8px 12px; background: #161513; border: 1px solid #2e2d2a; border-radius: 14px; box-shadow: 0 12px 32px rgba(0,0,0,0.5); font-family: Inter, system-ui, sans-serif; font-size: 12px; color: #e8e6e1"><span style="width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: {{upd.dot}}"></span><span style="min-width: 0; overflow-wrap: anywhere">{{upd.text}}</span><sc-if value="{{upd.ready}}" hint-placeholder-val="{{ false }}"><button type="button" onClick="{{ updInstall }}" style="min-height: 28px; padding: 0 12px; background: #d97757; border: 0; border-radius: 8px; color: #181715; font: inherit; font-weight: 600; cursor: pointer">지금 재시작</button></sc-if><button type="button" onClick="{{ updLater }}" style="min-height: 28px; padding: 0 12px; background: transparent; border: 1px solid #2e2d2a; border-radius: 8px; color: #a8a59c; font: inherit; cursor: pointer">나중에</button></div>
+</sc-if>
+<p style="position: absolute; left: 24px; bottom: 20px; margin: 0; font-family: Inter, system-ui, sans-serif; font-size: 12px; letter-spacing: 0.04em; color: #8a877f; pointer-events: none">코디네이터 창에 지시 입력 · 하달된 만큼만 Operator·Worker가 뜸 · Operator 더블클릭: 워커 보기 · 배경 드래그: 화면 이동 · 휠: 확대/축소 · 더블클릭: 원위치</p>
+<p style="position: absolute; right: 24px; bottom: 20px; margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #8a877f; pointer-events: none">{{zoomPct}}%</p>
+</div>
+</script>
+<script src="../node_modules/react/umd/react.production.min.js"></script>
+<script src="../node_modules/react-dom/umd/react-dom.production.min.js"></script>
+<script src="./runtime.js"></script>
+<script src="./terminal.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>

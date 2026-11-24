@@ -1,0 +1,139 @@
+# Terrarium 하네스 머지 트레인 (결정 8-32). 사용자가 끝 보고에서 트레인을 승인하면 하네스의 run-train이 이 워크플로를 시작한다
+# (gh workflow run harness-train.yml -f handoffs=h24,h25 -f request=<12자리>). 하네스가 하는 gh 쓰기는 이것 하나다.
+# 1. train/<날짜>-<순번>에 main부터 하달 PR(integration/h<N>)들을 입력 순서대로 쌓는다(순서는 하네스가 반영 순서 검사로 정해 넘긴다).
+# 2. CI(시험 명령)를 한 번 돌린다.
+# 3. 통과하면 main을 트레인 끝으로 빨리감기만 하고(강제 아님) 하달 PR들을 닫는다.
+# 4. 실패하면 main은 그대로 둔다. 맨 뒤 하달부터 하나씩 빼며 다시 돌려 실패한 하달을 찾고 요약에 남긴다. 부분 머지는 하지 않는다(사용자에게 묻는다).
+# 5. (결정 8-35) main에 올린 뒤에만: 들어간 하달들의 남은 이슈 PR을 닫고 h<N>/issue-*, integration/h<N>, 이 train/… 원격 브랜치를 지운다.
+#    지우기는 safe_delete 하나로만(세 모양만, main은 절대 아님). 정리가 실패해도 결과 줄과 종료 코드는 바뀌지 않는다. 실패 길에서는 아무것도 지우지 않는다.
+# 결과는 실행 기록에 HARNESS_TRAIN_RESULT <JSON> 한 줄로도 찍는다(하네스는 gh run view --log로 읽는다. 요약은 사람이 본다).
+# 실패면 결과 줄의 failure 칸에 실패한 단계(fetch·merge·install·test·push), 그 하달, 마지막으로 실패한 시도의 출력 끝(30줄, 줄마다 200자)을 넣는다.
+# main 보호 규칙이 있으면 GITHUB_TOKEN의 push가 막힐 수 있다(사전 점검이 안내한다). GitHub 머지 큐는 쓰지 않는다(결정 6).
+name: harness-train
+run-name: harness-train ${{ inputs.request }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      handoffs:
+        description: 쌓을 하달 목록(의존 순서, 쉼표로 이음. 예 h24,h25)
+        required: true
+        type: string
+      request:
+        description: 하네스가 이 실행을 찾는 요청 번호(12자리 16진수)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: harness-train
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 트레인 쌓기, CI, 머지 또는 실패 하달 찾기
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HANDOFFS: ${{ inputs.handoffs }}
+          REQUEST: ${{ inputs.request }}
+          RUN_NUMBER: ${{ github.run_number }}
+          HARNESS_TEST_COMMAND: ${{ vars.HARNESS_TEST_COMMAND || 'npm test' }}
+        run: |
+          set -uo pipefail
+          if [[ ! "$HANDOFFS" =~ ^h[1-9][0-9]{0,8}(,h[1-9][0-9]{0,8}){0,9}$ ]]; then echo "::error::하달 목록 모양이 아니다"; exit 1; fi
+          if [[ ! "$REQUEST" =~ ^[0-9a-f]{12}$ ]]; then echo "::error::요청 번호 모양이 아니다"; exit 1; fi
+          IFS=',' read -r -a LIST <<< "$HANDOFFS"
+          N=${#LIST[@]}
+          TRAIN="train/$(date -u +%Y%m%d)-$RUN_NUMBER"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          MAIN_BEFORE=$(git rev-parse HEAD)
+          json_list() { if [ "$#" -eq 0 ]; then echo '[]'; else printf '%s\n' "$@" | jq -R . | jq -cs .; fi; }
+          safe_delete() {
+            local b="$1"
+            if [ "$b" = "main" ] || [[ ! "$b" =~ ^(h[1-9][0-9]{0,8}/issue-[1-9][0-9]{0,8}|integration/h[1-9][0-9]{0,8}|train/[0-9]{8}-[0-9]{1,9})$ ]]; then
+              echo "::warning::하네스 브랜치 모양이 아니어서 지우지 않는다: $b"
+              return 0
+            fi
+            gh api -X DELETE "repos/$REPO/git/refs/heads/$b" --silent || echo "::warning::$b를 지우지 못했다"
+          }
+          FAIL_LOG="$RUNNER_TEMP/harness-fail.log"
+          : > "$FAIL_LOG"
+          FAIL_STAGE=""
+          FAIL_HANDOFF=""
+          # 실패한 시도의 출력만 남긴다(뒤에 통과한 시도가 덮지 않게). 하네스가 실패 원인으로 읽는다.
+          failure_json() {
+            jq -cn --arg s "$FAIL_STAGE" --arg h "$FAIL_HANDOFF" --rawfile l "$FAIL_LOG" '{stage:$s,handoff:(if $h == "" then null else $h end),tail:($l | split("\n") | map(select(length > 0)) | .[-30:] | map(.[0:200]))}'
+          }
+          emit() {
+            echo "HARNESS_TRAIN_RESULT $1"
+            { echo "## 머지 트레인 $TRAIN"; echo; echo "$2"; } >> "$GITHUB_STEP_SUMMARY"
+          }
+          for h in "${LIST[@]}"; do
+            if ! git fetch --no-tags origin "refs/heads/integration/$h:refs/remotes/origin/integration/$h" > "$FAIL_LOG" 2>&1; then
+              cat "$FAIL_LOG"; FAIL_STAGE=fetch; FAIL_HANDOFF="$h"
+              emit "$(jq -cn --arg t "$TRAIN" --arg f "$h" --argjson fl "$(failure_json)" '{result:"failed",train:$t,merged:[],failedHandoff:$f,passingPrefix:[],mainAfter:null,failure:$fl}')" "integration/$h를 읽지 못했다. main은 그대로다."
+              exit 1
+            fi
+          done
+          # 종료 코드는 그대로 돌려준다(출력은 파일로 받고 실행 기록에도 찍는다. 파이프를 쓰지 않는다).
+          attempt() {
+            local out="$RUNNER_TEMP/harness-attempt.log" stage="" fh="" rc=0
+            : > "$out"
+            git checkout -q -B "$TRAIN" "$MAIN_BEFORE"
+            for h in "${LIST[@]:0:$1}"; do
+              if ! git merge -q --no-ff "origin/integration/$h" -m "트레인: $h" > "$out" 2>&1; then cat "$out"; git merge --abort; stage=merge; fh="$h"; rc=1; break; fi
+            done
+            if [ "$rc" -eq 0 ] && [ -f package-lock.json ]; then npm ci > "$out" 2>&1; rc=$?; cat "$out"; if [ "$rc" -ne 0 ]; then stage=install; fi; fi
+            if [ "$rc" -eq 0 ]; then bash -c "$HARNESS_TEST_COMMAND" > "$out" 2>&1; rc=$?; cat "$out"; if [ "$rc" -ne 0 ]; then stage=test; fi; fi
+            if [ "$rc" -ne 0 ]; then FAIL_STAGE="$stage"; FAIL_HANDOFF="$fh"; cp "$out" "$FAIL_LOG"; fi
+            return "$rc"
+          }
+          if attempt "$N"; then
+            AFTER=$(git rev-parse HEAD)
+            git push origin "$AFTER:refs/heads/$TRAIN" || exit 1
+            if ! git push origin "$AFTER:refs/heads/main" > "$FAIL_LOG" 2>&1; then
+              cat "$FAIL_LOG"; FAIL_STAGE=push; FAIL_HANDOFF=""
+              emit "$(jq -cn --arg t "$TRAIN" --argjson fl "$(failure_json)" '{result:"failed",train:$t,merged:[],failedHandoff:null,passingPrefix:[],mainAfter:null,failure:$fl}')" "CI는 통과했지만 main에 올리지 못했다(main이 그사이 바뀌었거나 보호 규칙). main은 그대로다."
+              exit 1
+            fi
+            for h in "${LIST[@]}"; do
+              NUM=$(gh pr list --repo "$REPO" --head "integration/$h" --base main --state open --json number --jq '.[0].number // empty')
+              if [ -n "$NUM" ]; then gh pr close "$NUM" --repo "$REPO" --comment "머지 트레인 $TRAIN으로 main에 들어갔다" || true; fi
+            done
+            emit "$(jq -cn --arg t "$TRAIN" --argjson m "$(json_list "${LIST[@]}")" --arg a "$AFTER" '{result:"merged",train:$t,merged:$m,failedHandoff:null,passingPrefix:$m,mainAfter:$a}')" "통과. main을 $AFTER로 빨리감기했다. 하달: $HANDOFFS"
+            for h in "${LIST[@]}"; do
+              for b in $(gh api --paginate "repos/$REPO/git/matching-refs/heads/$h/issue-" --jq '.[].ref | ltrimstr("refs/heads/")' || true); do
+                for num in $(gh pr list --repo "$REPO" --head "$b" --state open --json number --jq '.[].number' || true); do
+                  gh pr close "$num" --repo "$REPO" --comment "머지 트레인 $TRAIN으로 하달 $h가 main에 들어가 정리한다. 이 이슈가 들어가지 않았다면 새 하달로 재작업한다(결정 8-35)" || true
+                done
+                safe_delete "$b"
+              done
+              safe_delete "integration/$h"
+            done
+            safe_delete "$TRAIN"
+            exit 0
+          fi
+          K=$((N - 1))
+          while [ "$K" -gt 0 ]; do
+            if attempt "$K"; then break; fi
+            K=$((K - 1))
+          done
+          FAILED="${LIST[$K]}"
+          PREFIX=("${LIST[@]:0:$K}")
+          emit "$(jq -cn --arg t "$TRAIN" --arg f "$FAILED" --argjson p "$(json_list "${PREFIX[@]}")" --argjson fl "$(failure_json)" '{result:"failed",train:$t,merged:[],failedHandoff:$f,passingPrefix:$p,mainAfter:null,failure:$fl}')" "실패. main은 그대로다. 실패한 하달: $FAILED(단계: ${FAIL_STAGE:-?}). 통과한 앞부분: ${PREFIX[*]:-없음}. 부분 머지는 하지 않았다(사용자가 정한다)."
+          exit 1
