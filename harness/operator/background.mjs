@@ -86,7 +86,8 @@ export function report(r, { token, harnessDir, write, writeErr = (l) => console.
 }
 
 // 부모 쪽: entry를 --bg-token과 함께 분리 실행하고 기다린다.
-export async function startAndWait({ run, harnessDir, entry, args, env = process.env, write = (l) => console.log(l), spawn = nodeSpawn, record = false }) {
+// waitMs: 기다릴 시간(없으면 HARNESS_BG_WAIT_MS 또는 9분). 0이면 띄우자마자 대기 번호를 낸다(run-worker --detach yes).
+export async function startAndWait({ run, harnessDir, entry, args, env = process.env, write = (l) => console.log(l), spawn = nodeSpawn, record = false, waitMs }) {
   const token = randomBytes(6).toString('hex');
   // Windows에서 detached가 아니면 Node(libuv)가 자식을 작업 객체에 넣어 부모가 끝날 때 같이 죽인다(run-8에서 재현). 그래서 detached로 띄운다.
   // 그런데 detached 프로세스는 콘솔이 없어, 그 아래에서 부르는 git이 가끔 콘솔 닫힘(0xC000013A)으로 죽는다.
@@ -105,7 +106,7 @@ export async function startAndWait({ run, harnessDir, entry, args, env = process
   // "가장 최근 bg 파일"로 찾으면 워커의 번호를 잡는다(run-18 h7, 2026-11-20). Esc 뒤 코디네이터는 이 파일 하나만 읽는다.
   if (record) writeLastWait(run, record, { token, script: basename(entry), args, startedAt });
   launcher.unref?.();
-  return report(await waitFor(run, token, { waitMs: waitMsOf(env), launcherPid: launcher.pid ?? null }), { token, harnessDir, write });
+  return report(await waitFor(run, token, { waitMs: waitMs ?? waitMsOf(env), launcherPid: launcher.pid ?? null }), { token, harnessDir, write });
 }
 
 // 발사 프로세스: detached 자식을 띄우고, 기다리는 쪽이 볼 pid를 자식 것으로 바꿔 쓴 뒤 바로 끝난다.
@@ -139,8 +140,15 @@ export async function runChild({ run, token, main, argv, env }) {
   return code;
 }
 
-// run-operator·run-research의 명령줄 진입점. --bg-token이 있으면 자식, HARNESS_FOREGROUND=1이면 예전처럼 그 자리에서 돈다.
-export async function cliEntry({ main, entry, argv = process.argv.slice(2), env = process.env, record = false }) {
+// run-operator·run-research·run-worker의 명령줄 진입점. --bg-token이 있으면 자식, HARNESS_FOREGROUND=1이면 예전처럼 그 자리에서 돈다.
+// detachable(run-worker만): `--detach yes`가 있으면 그 두 인자를 빼고, 기다리지 않고 바로 대기 번호(종료 코드 8)를 낸다.
+// 오퍼레이터가 서로 기대지 않는 이슈의 워커를 한꺼번에 띄운 뒤 wait-operator로 하나씩 결과를 받는 데 쓴다.
+export async function cliEntry({ main, entry, argv = process.argv.slice(2), env = process.env, record = false, detachable = false }) {
+  let detach = false;
+  if (detachable && !argv.some((a) => a === '--bg-launch' || a === '--bg-token' || a === '--bg-run')) {
+    const i = argv.indexOf('--detach');
+    if (i !== -1 && argv[i + 1] === 'yes') { detach = true; argv = argv.filter((_, k) => k !== i && k !== i + 1); }
+  }
   const run = fwd(env.HARNESS_RUN_DIR || process.cwd());
   for (const flag of ['--bg-launch', '--bg-token', '--bg-run']) {
     const t = argv.indexOf(flag);
@@ -155,5 +163,5 @@ export async function cliEntry({ main, entry, argv = process.argv.slice(2), env 
   // 실행 폴더가 아니면(harness.json 없음) 분리하지 않는다: main이 바로 오류를 낸다.
   let harnessDir;
   try { harnessDir = fwd(JSON.parse(readFileSync(`${run}/harness.json`, 'utf8')).harnessDir); } catch { return main(argv, env); }
-  return startAndWait({ run, harnessDir, entry, args: argv, env, record });
+  return startAndWait({ run, harnessDir, entry, args: argv, env, record, ...(detach ? { waitMs: 0 } : {}) });
 }

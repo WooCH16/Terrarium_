@@ -20,6 +20,14 @@ test('no result file name contains "report" (test run 4 lesson)', () => {
   for (const p of MODE_DOCS) assert.doesNotMatch(read(p), /[^\s`'"]*report[^\s`'"]*\.md/i, p);
 });
 
+test('작업 모드: 서로 기대지 않는 이슈의 워커는 --detach yes로 한꺼번에(최대 3개) 띄우고 wait-operator로 받는다', () => {
+  const w = read('operator/skills/operator-work/SKILL.md');
+  assert.match(w, /run-worker\.mjs --handoff h<N> --issue <번호> --model <워커 모델> --detach yes/);
+  assert.match(w, /최대 3개/);
+  assert.match(w, /wait-operator\.mjs --wait <번호>/);
+  assert.match(w, /모든 워커가 끝난 뒤에만 5절/);
+});
+
 test('work.md: worker and enqueue steps, and no direct merge into main', () => {
   const w = read('operator/skills/operator-work/SKILL.md');
   assert.match(w, /run-worker/);

@@ -24,7 +24,7 @@ const main = async (argv, env, deps = {}) => {
   write('#7 | 막힘 | https://x/7 args=' + argv.join(' '));
   return 1;
 };
-process.exitCode = await cliEntry({ main, entry: fileURLToPath(import.meta.url), record: process.env.FAKE_RECORD || false });
+process.exitCode = await cliEntry({ main, entry: fileURLToPath(import.meta.url), record: process.env.FAKE_RECORD || false, detachable: process.env.FAKE_DETACHABLE === '1' });
 `;
 
 function setup() {
@@ -73,6 +73,23 @@ test('run-18 h7: 코디네이터가 띄운 실행만 last-wait.json에 대기 �
   assert.equal(last.token, token);
   assert.equal(last.script, 'fake-entry.mjs');
   assert.deepEqual(last.args, ['--issues', '7']);
+});
+
+test('--detach yes(워커 동시 실행): 기다리지 않고 바로 대기 번호(8)를 내고, 자식에게는 --detach를 넘기지 않으며, wait-operator로 결과를 받는다', async () => {
+  const s = setup();
+  const started = Date.now();
+  const spawnArgs = (extra) => spawnSync(process.execPath, [`${s.run}/fake-entry.mjs`, '--issues', '7', ...extra], { cwd: s.run, encoding: 'utf8', env: { ...process.env, HARNESS_RUN_DIR: s.run, HARNESS_FOREGROUND: '', FAKE_SLEEP_MS: '2500', HARNESS_BG_WAIT_MS: '20000', FAKE_DETACHABLE: '1' } });
+  const r = spawnArgs(['--detach', 'yes']);
+  assert.equal(r.status, 8, r.stderr);
+  assert.ok(Date.now() - started < 2000, `기다리지 않는다(${Date.now() - started}ms)`);
+  const token = /대기 번호 ([0-9a-f]{12})/.exec(r.stdout)[1];
+  const out = [];
+  const code = await waitMain(['--wait', token], { HARNESS_RUN_DIR: s.run }, { write: (l) => out.push(l), waitMs: 20000, pollMs: 50 });
+  assert.equal(code, 1);
+  assert.deepEqual(out, ['#7 | 막힘 | https://x/7 args=--issues 7'], '--detach는 자식에게 가지 않는다');
+  // detachable이 아닌 스크립트(run-operator 등)에서는 알 수 없는 인자 그대로 main에 간다
+  const plain = spawnSync(process.execPath, [`${s.run}/fake-entry.mjs`, '--issues', '7', '--detach', 'yes'], { cwd: s.run, encoding: 'utf8', env: { ...process.env, HARNESS_RUN_DIR: s.run, HARNESS_FOREGROUND: '1', FAKE_SLEEP_MS: '10' } });
+  assert.match(plain.stdout, /args=--issues 7 --detach yes/);
 });
 
 test('CI 흔들림: 발사 프로세스가 자식 pid를 먼저 써도 부모가 끝난 발사 pid로 덮어 "죽음"(2)으로 보지 않는다', async () => {

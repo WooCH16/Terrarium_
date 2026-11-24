@@ -1,4 +1,5 @@
-// 워커 시작: node run-worker.mjs --handoff h<N> --issue <n> --model <name> [--base main]
+// 워커 시작: node run-worker.mjs --handoff h<N> --issue <n> --model <name> [--base main] [--detach yes]
+// --detach yes: 기다리지 않고 바로 대기 번호를 낸다(서로 기대지 않는 이슈의 워커 동시 실행, background.mjs cliEntry가 처리).
 // 이슈 브랜치 h<N>/issue-<n>의 워크트리를 만들고 러너를 최대 (workerRetries+1)번 실행해 .harness/worker-result.md를 검사한다.
 // stdout에는 한 줄 JSON(시작·종료 main 해시, 시도 횟수, model(실제로 띄운 모델 타입), replacedFrom·replacedReason(대체됐을 때), 워크트리 이름)만, 오류는 stderr에 `오류:` 한 줄.
 // 지정 모델을 쓸 수 없으면(허용 목록 밖, CLI 없음) operator.config.json의 fallback을 순환한다. publicOnly 모델(muse)은 이슈 본문에 `공개 가능: 예`가 있을 때만 대체로 쓴다.
@@ -594,5 +595,5 @@ export function protectedChanges(before, after) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   // 분리 실행(background.mjs): 오퍼레이터의 Bash 호출은 10분에서 끊기거나 백그라운드로 넘어간다. 9분 안에 안 끝나면 종료 코드 8과 대기 번호.
   const { cliEntry } = await import('./background.mjs');
-  process.exitCode = await cliEntry({ main, entry: fileURLToPath(import.meta.url) });
+  process.exitCode = await cliEntry({ main, entry: fileURLToPath(import.meta.url), detachable: true });
 }

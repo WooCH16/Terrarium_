@@ -29,6 +29,8 @@ function workScripts(config) {
       // 시작 지점 하달(--base-handoff, 결정 8-31)이 있으면 그 하달의 이슈 브랜치도 받는다. 그 하달의 통합 브랜치는 받지 않는다(같은 이유).
       '--base': (v) => v === 'main' || new RegExp(`^${config.handoff}/issue-[1-9][0-9]{0,8}$`).test(v)
         || (typeof config.baseHandoff === 'string' && /^h[1-9]\d*$/.test(config.baseHandoff) && config.baseHandoff !== config.handoff && new RegExp(`^${config.baseHandoff}/issue-[1-9][0-9]{0,8}$`).test(v)),
+      // 서로 기대지 않는 이슈의 워커를 한꺼번에 띄운다: 바로 대기 번호를 받고 wait-operator로 결과를 받는다(background.mjs).
+      '--detach': (v) => v === 'yes',
       required: ['--handoff', '--issue', '--model'] },
     'merge-adapter-enqueue.mjs': { '--handoff': handoff, required: ['--handoff'] },
     // run-worker가 9분 안에 안 끝나면 종료 코드 8과 대기 번호를 낸다. 이어서 기다리는 명령(run-8).
