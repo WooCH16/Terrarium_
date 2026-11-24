@@ -84,8 +84,15 @@ function guard(w) {
 }
 
 // 관제탑 화면은 스스로 확대·축소한다(휠, 세션이 뜨면 맞춤). 창 배율은 건드리지 않는다.
+// 흰 제목 표시줄은 숨긴다. 창 단추(최소화·최대화·닫기)만 배경색 위에 남고, 위쪽 TITLE_H는 창을 끄는 자리다
+// (tower/index.html의 #tb, 설정 화면도 그 아래에 붙는다).
+const TITLE_H = 32;
 function towerWindow({ show = true } = {}) {
-  const w = new BrowserWindow({ width: 1440, height: 900, minWidth: 720, minHeight: 520, show, title: 'Terrarium', backgroundColor: '#0e0d0b', webPreferences: { ...webPreferences(), backgroundThrottling: false } });
+  const w = new BrowserWindow({
+    width: 1440, height: 900, minWidth: 720, minHeight: 520, show, title: 'Terrarium', backgroundColor: '#0e0d0b',
+    titleBarStyle: 'hidden', titleBarOverlay: { color: '#0e0d0b', symbolColor: '#a8a59c', height: TITLE_H },
+    webPreferences: { ...webPreferences(), backgroundThrottling: false },
+  });
   w.setMenuBarVisibility(false);
   guard(w);
   w.on('resize', fitSettings);
@@ -165,7 +172,7 @@ function createWindow() {
 function fitSettings() {
   if (!settingsView || !win || win.isDestroyed()) return;
   const [w, h] = win.getContentSize();
-  settingsView.setBounds({ x: 0, y: 0, width: w, height: h });
+  settingsView.setBounds({ x: 0, y: TITLE_H, width: w, height: Math.max(0, h - TITLE_H) });
 }
 function openSettings(tab = 'accounts', { project } = {}) {
   if (!win || win.isDestroyed()) return null;

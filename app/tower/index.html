@@ -9,6 +9,9 @@
 <style>
 html,body{height:100%}
 body{margin:0;background:#0e0d0b}
+/* 흰 제목 표시줄 대신: 위쪽 32px는 창을 끄는 자리(오른쪽에 창 단추), 화면은 그 아래. main.js TITLE_H */
+#tb{position:fixed;left:0;right:0;top:0;height:32px;-webkit-app-region:drag}
+#root{position:fixed;left:0;right:0;top:32px;bottom:0}
 a{color:#8a877f}a:hover{color:#c9c6bd}
 #cmd::placeholder{color:#8a877f}
 nav svg,nav button>button,[role=toolbar] svg,[role=toolbar] button[aria-label]{flex-shrink:0}
@@ -18,9 +21,10 @@ nav svg,nav button>button,[role=toolbar] svg,[role=toolbar] button[aria-label]{f
 </style>
 </head>
 <body>
+<div id="tb"></div>
 <div id="root"></div>
 <script type="text/x-template" id="screen">
-<div style="position: relative; width: 100%; height: 100vh; min-height: 480px; background: {{background}}; overflow: hidden">
+<div style="position: relative; width: 100%; height: 100%; min-height: 480px; background: {{background}}; overflow: hidden">
 <canvas ref="{{ setCanvas }}" aria-hidden="true" style="position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: {{bgCursor}}"></canvas>
 <div style="position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform: {{stageTransform}}; transform-origin: 0 0">
 <svg width="1" height="1" aria-hidden="true" style="position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none">
