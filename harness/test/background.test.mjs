@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { main as waitMain } from '../operator/wait-operator.mjs';
 import { decide } from '../policy.mjs';
+import { startAndWait, writeBg } from '../operator/background.mjs';
 
 const fwd = (p) => p.split(String.fromCharCode(92)).join('/');
 const made = [];
@@ -72,6 +73,16 @@ test('run-18 h7: 코디네이터가 띄운 실행만 last-wait.json에 대기 �
   assert.equal(last.token, token);
   assert.equal(last.script, 'fake-entry.mjs');
   assert.deepEqual(last.args, ['--issues', '7']);
+});
+
+test('CI 흔들림: 발사 프로세스가 자식 pid를 먼저 써도 부모가 끝난 발사 pid로 덮어 "죽음"(2)으로 보지 않는다', async () => {
+  const s = setup();
+  const DEAD = 99999999; // 없는 pid: 이미 끝난 발사 프로세스
+  // 가짜 spawn: 발사 프로세스가 부모보다 먼저 자식(살아 있는 이 프로세스) pid를 써 버린 순서를 만든다.
+  const spawn = (_bin, args) => { writeBg(s.run, args[2], { done: false, pid: process.pid, startedAt: new Date().toISOString() }); return { pid: DEAD, on() {}, unref() {} }; };
+  const out = [];
+  const code = await startAndWait({ run: s.run, harnessDir: 'C:/h', entry: 'x.mjs', args: [], env: { HARNESS_BG_WAIT_MS: '100' }, write: (l) => out.push(l), spawn });
+  assert.equal(code, 8, out.join('\n'));
 });
 
 test('run-7: wait-operator는 모르는 번호·잘못된 인자를 2로 거부한다', async () => {

@@ -24,10 +24,12 @@ export function waitMsOf(env) {
 export function writeBg(run, token, data) {
   const f = fileOf(run, token);
   mkdirSync(`${fwd(run)}/handoffs/bg`, { recursive: true });
-  writeFileSync(`${f}.tmp`, JSON.stringify(data));
+  // 임시 파일은 프로세스마다 따로: 발사 프로세스와 자식이 거의 같은 순간에 쓰면 같은 .tmp를 서로 덮고 한쪽 rename이 실패했다.
+  const tmp = `${f}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(data));
   // Windows에서는 기다리는 쪽이 파일을 읽는 순간 교체가 EPERM·EBUSY로 실패할 수 있다: 잠깐 쉬고 다시 한다.
   for (let i = 0; ; i++) {
-    try { renameSync(`${f}.tmp`, f); return; } catch (e) {
+    try { renameSync(tmp, f); return; } catch (e) {
       if (i >= 50 || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code)) throw e;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
     }
@@ -54,18 +56,21 @@ const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 결과를 waitMs 동안 기다린다. 끝났으면 { done: true, lines, code }, 자식이 결과 없이 죽었으면 { dead: true }, 아니면 { done: false }.
-export async function waitFor(run, token, { waitMs, pollMs = 1000, now = () => Date.now() } = {}) {
+// launcherPid: 파일에 아직 pid가 없을 때(발사 프로세스가 자식 pid를 쓰기 전) 대신 볼 발사 프로세스의 pid.
+export async function waitFor(run, token, { waitMs, pollMs = 1000, now = () => Date.now(), launcherPid = null } = {}) {
   const until = now() + waitMs;
   for (;;) {
     const d = readBg(run, token);
     if (d?.done) return { done: true, lines: d.lines ?? [], errLines: d.errLines ?? [], code: d.code };
     // 전체 기한: 세션 제한(2시간) + 워커 시도를 넘겨도 끝나지 않으면 죽은 것으로 본다(pid 재사용 대비).
     if (d?.startedAt && Date.now() - new Date(d.startedAt).getTime() > MAX_LIFE_MS) return { dead: true };
-    if (d?.pid && !alive(d.pid)) {
-      // 결과를 쓰고 죽는 틈일 수 있다: 잠깐 뒤 한 번 더 읽는다.
+    const pid = d?.pid ?? launcherPid;
+    if (pid && !alive(pid)) {
+      // 결과를 쓰고 죽는 틈이거나, 발사 프로세스가 자식 pid를 막 쓰고 끝난 틈일 수 있다: 잠깐 뒤 한 번 더 읽는다.
       await sleep(500);
       const again = readBg(run, token);
       if (again?.done) return { done: true, lines: again.lines ?? [], errLines: again.errLines ?? [], code: again.code };
+      if (again?.pid && again.pid !== pid && alive(again.pid)) continue;
       return { dead: true };
     }
     if (now() >= until) return { done: false };
@@ -89,16 +94,18 @@ export async function startAndWait({ run, harnessDir, entry, args, env = process
   // 바로 detached 자식을 띄우지 않고, 띄우기만 하고 곧 끝나는 발사 프로세스(--bg-launch)를 거친다.
   // 코디네이터가 Esc로 턴을 끊으면 Claude Code가 이 부모의 프로세스 트리를 통째로 끝낸다. detached여도 부모가 살아 있으면
   // 트리에 걸려 하달이 같이 죽었다(run-18 h5, 2026-11-20). 발사 프로세스가 먼저 끝나면 detached 자식은 부모 없는 프로세스가 되어 트리 밖에 있다.
+  // 첫 기록은 발사 전에 쓴다(pid 없음). 발사 뒤에 쓰면, 발사 프로세스가 이미 자식 pid를 써 둔 것을 끝난 발사 pid로 덮어
+  // 기다리는 쪽이 "결과 없이 죽음"(2)으로 볼 수 있었다(CI에서 흔들림, 2026-11-24). 발사 pid는 메모리로만 넘겨,
+  // 자식이 자기 기록을 쓰기 전에 죽어도 기다리는 쪽이 알아챈다(fable 조언 2).
+  const startedAt = new Date().toISOString();
+  writeBg(run, token, { done: false, pid: null, startedAt });
   const launcher = spawn(process.execPath, [entry, '--bg-launch', token, ...args], { cwd: process.cwd(), env, detached: true, stdio: 'ignore', windowsHide: true });
   launcher.on?.('error', () => {});
-  // 첫 기록부터 pid를 남긴다: 자식이 자기 기록을 쓰기 전에 죽어도 기다리는 쪽이 알아챈다(fable 조언 2). 발사 프로세스가 곧 자식 pid로 바꿔 쓴다.
-  const startedAt = new Date().toISOString();
-  writeBg(run, token, { done: false, pid: launcher.pid ?? null, startedAt });
   // 코디네이터가 띄운 하달·조사만 대기 번호를 고정 파일에 남긴다(record). 오퍼레이터가 부르는 run-worker도 같은 bg 폴더에 쓰므로,
   // "가장 최근 bg 파일"로 찾으면 워커의 번호를 잡는다(run-18 h7, 2026-11-20). Esc 뒤 코디네이터는 이 파일 하나만 읽는다.
   if (record) writeLastWait(run, record, { token, script: basename(entry), args, startedAt });
   launcher.unref?.();
-  return report(await waitFor(run, token, { waitMs: waitMsOf(env) }), { token, harnessDir, write });
+  return report(await waitFor(run, token, { waitMs: waitMsOf(env), launcherPid: launcher.pid ?? null }), { token, harnessDir, write });
 }
 
 // 발사 프로세스: detached 자식을 띄우고, 기다리는 쪽이 볼 pid를 자식 것으로 바꿔 쓴 뒤 바로 끝난다.
