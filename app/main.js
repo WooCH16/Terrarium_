@@ -16,6 +16,7 @@ import { testgoTimeline, scanTestgo, typedLines } from './lib/testgo.mjs';
 import { install, checkInstallInput, originRepo } from './lib/install.mjs';
 import { UpdateNotifier } from './lib/updater.mjs';
 import { buildLimits } from './lib/limits.mjs';
+import { safeLink } from './lib/links.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fwd = (p) => String(p).replace(/\\/g, '/');
@@ -530,6 +531,15 @@ ipcMain.handle('settings:save', (_e, { designatedRepo } = {}) => {
 // ---- 진행 표시 (#40): 설정 화면의 진행 기록 탭 ----
 ipcMain.handle('status', async (_e, { run }) => { if (!allowedRun(run)) return { ok: false, error: '실행 폴더를 고르세요.' }; try { return { ok: true, status: await readStatus(run, ghExec) }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('open:url', (_e, { url }) => { if (/^https:\/\/github\.com\//.test(url)) shell.openExternal(url); });
+// 코디네이터 터미널의 링크(예: Claude Code가 띄운 개발 서버 http://127.0.0.1:3000)는 기본 브라우저로 연다.
+// 앱 창 안에서는 다른 페이지로 넘어가지 않는다(guard). http·https만, 계정 정보 없는 주소만(lib/links.mjs).
+let openExternal = (url) => shell.openExternal(url); // 스모크 시험이 바꿔 끼운다
+ipcMain.handle('term:open-link', (_e, { url } = {}) => {
+  const ok = safeLink(url);
+  if (!ok) return { ok: false };
+  openExternal(ok);
+  return { ok: true };
+});
 
 // 시험용: TERRARIUM_USER_DATA로 앱 데이터 폴더를 바꾸고, TERRARIUM_SMOKE=<폴더>이면 관제탑을 입력 이벤트로 움직여 검사한 뒤 끝낸다.
 // 보통은 app/test/smoke.mjs가 임시 폴더와 가짜 코디네이터(TERRARIUM_FAKE_CLAUDE)를 준비해 부른다. 설치본에서는 시험용 환경 변수를 무시한다.
@@ -647,6 +657,17 @@ async function smoke(dir) {
     await shot('02b-limits');
     await click(usageBtn.x, usageBtn.y);
     await wait(200);
+    // 터미널 링크(OSC 8): 누르면 영어 confirm 창 없이 기본 브라우저로 넘긴다(http만이 아닌 로컬 개발 서버도).
+    const opened = [];
+    const realOpen = openExternal;
+    openExternal = (u) => { opened.push(u); };
+    await js(`window.__confirms = 0; window.confirm = () => { window.__confirms += 1; return false; }; window.__terrariumTerm.write('\\r\\n\\x1b]8;;http://127.0.0.1:3000\\x07LINKTEST\\x1b]8;;\\x07\\r\\n')`);
+    await wait(300);
+    const at = await js(`(() => { const t = window.__terrariumTerm; const b = t.buffer.active; for (let y = 0; y < b.length; y++) { const s = b.getLine(y).translateToString(true); const x = s.indexOf('LINKTEST'); if (x >= 0) { const r = t.element.querySelector('.xterm-screen').getBoundingClientRect(); const cw = r.width / t.cols, ch = r.height / t.rows; return { x: r.left + (x + 2) * cw, y: r.top + (y - b.viewportY + 0.5) * ch }; } } return null; })()`);
+    if (at) { mouse('mouseMove', at.x, at.y); await wait(150); await click(at.x, at.y); await wait(400); }
+    const confirms = await js('window.__confirms');
+    openExternal = realOpen;
+    check('터미널 링크를 누르면 경고 창 없이 기본 브라우저로 넘긴다(http://127.0.0.1:3000)', Boolean(at) && confirms === 0 && opened[0] === 'http://127.0.0.1:3000/', { at, confirms, opened });
     // 창이 작아져도(해상도가 낮아도) 왼쪽 위·오른쪽 위 칸은 창 안에 남는다.
     const [cw0, ch0] = win.getContentSize();
     win.setContentSize(740, 540);

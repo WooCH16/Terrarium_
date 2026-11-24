@@ -57,5 +57,7 @@ contextBridge.exposeInMainWorld('terrarium', {
     openSettings: (tab) => ipcRenderer.invoke('settings:open', { tab }),
     // /testgo: 화면 시험(가짜 세션 이벤트, 3분 뒤 원래 화면)
     testgo: () => ipcRenderer.send('testgo:start'),
+    // 터미널 링크를 기본 브라우저로(http·https만, 메인 프로세스가 다시 검사)
+    openLink: (url) => ipcRenderer.invoke('term:open-link', { url }),
   },
 });
