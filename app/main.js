@@ -15,6 +15,7 @@ import { FlowTracker, readFlowSnapshot } from './lib/flow.mjs';
 import { testgoTimeline, scanTestgo } from './lib/testgo.mjs';
 import { install, checkInstallInput, originRepo } from './lib/install.mjs';
 import { UpdateNotifier } from './lib/updater.mjs';
+import { buildLimits } from './lib/limits.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fwd = (p) => String(p).replace(/\\/g, '/');
@@ -421,6 +422,35 @@ ipcMain.handle('usage:get', () => {
     : '아직 없음: 코디네이터가 한 번 답한 뒤에 보입니다(한도 막대는 Claude Pro·Max 구독에서만 옵니다).';
   return { available: meters.length > 0, meters, note };
 });
+// 한도 창(사용량 단추): 계정마다 읽을 수 있는 한도만. lib/limits.mjs. 바깥 명령(gh, pi)은 기억해 두고 다시 부르지 않는다.
+// 스모크 시험에서는 바깥 명령을 부르지 않는다(네트워크·로그인 없이).
+const offline = !app.isPackaged && Boolean(process.env.TERRARIUM_SMOKE);
+const remember = (ms, fn) => { let c = { at: 0, value: null }; return () => { if (Date.now() - c.at < ms) return c.value; c = { at: Date.now(), value: fn().catch(() => null) }; return c.value; }; };
+const ghRate = remember(60000, async () => {
+  if (offline) return null;
+  const j = JSON.parse(await ghExec(['api', 'rate_limit']));
+  const core = j?.resources?.core;
+  return core ? { limit: core.limit, remaining: core.remaining, reset: core.reset } : null;
+});
+const piAuth = remember(300000, async () => {
+  if (offline) return {};
+  const { launcher } = await import(pathToFileURL(`${harnessDir}/operator/model-exec.mjs`).href);
+  const l = launcher('pi', process.env);
+  if (!l) return {};
+  const bin = l.bin === process.execPath ? await nodeBin() : l.bin;
+  const check = async (provider) => {
+    // --no-refresh: 상태만 본다(토큰을 새로 받지 않는다). 자격 증명은 출력에 넣지 않는다(--credentials 없음).
+    const r = await exec(bin, [...l.args, 'auth', 'check', '--provider', provider, '--json', '--no-refresh'], { timeout: 20000 });
+    try { const j = JSON.parse(r.stdout); return { status: j.status, authType: j.authType }; } catch { return null; }
+  };
+  const [anthropic, meta] = await Promise.all([check('anthropic'), check('meta')]);
+  return { anthropic, meta };
+});
+ipcMain.handle('limits:get', async () => {
+  const [gh, pi] = await Promise.all([ghRate(), piAuth()]);
+  return buildLimits({ status: readStatusLine(), gh, pi: pi ?? {}, keys: keys().status() });
+});
+
 // 5분 기억한다. 읽는 중에 또 물으면 같은 결과를 기다린다(나중에 묻는 쪽이 "로그인 안 됨"을 잠깐 받지 않게).
 let ghLogin = { at: 0, value: null };
 function githubLogin() {
@@ -604,6 +634,15 @@ async function smoke(dir) {
     closeSettings();
     await wait(200);
     check('프로필 단추는 없다', !(await rectOf('button[aria-label="Profile"]')));
+    // 사용량 단추 → 계정별 한도 창(스모크에서는 gh·pi를 부르지 않아 "모름"이 나온다). 지어낸 막대가 없다.
+    const usageBtn = await rectOf('button[aria-label="사용량·한도"]');
+    await click(usageBtn.x, usageBtn.y);
+    await wait(600);
+    const lim = await js(`(() => { const d = document.querySelector('[role="dialog"][aria-label="한도"]'); return d ? { text: d.innerText, bars: d.querySelectorAll('[style*="background: #2a2926"]').length } : null; })()`);
+    check('사용량 단추를 누르면 계정별 한도 창(Claude·GitHub·Pi·Gemini·Jev)이 열리고, 못 읽은 계정은 막대 없이 이유만', Boolean(lim) && ['Claude', 'GitHub', 'Pi · Anthropic', 'Pi · Meta', 'Gemini', 'Jev(TypeSafe)'].every((n) => lim.text.includes(n)) && lim.bars === 0 && /첫 답/.test(lim.text), lim);
+    await shot('02b-limits');
+    await click(usageBtn.x, usageBtn.y);
+    await wait(200);
     // 업데이트 알림 띠: 받아 두면 [지금 재시작]·[나중에], [나중에]는 숨긴다(설치판에서만 오는 상태를 흉내).
     toTower('update:status', { state: 'ready', version: '9.9.9' });
     await wait(200);

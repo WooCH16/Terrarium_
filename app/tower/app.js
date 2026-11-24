@@ -186,6 +186,13 @@ class Component extends DCLogic {
     this.toggleFolder = togglePop('folder');
     this.toggleSettings = togglePop('settings');
     this.closePop = () => this.setState({ pop: null });
+    // 한도 창: 열 때마다 계정별 한도를 새로 읽는다(메인이 gh·pi 결과는 잠깐 기억).
+    this.limitRows = null;
+    this.toggleLimits = () => {
+      const open = this.state.pop !== 'limits';
+      this.setState({ pop: open ? 'limits' : null });
+      if (open && this.backend.usage.limits) this.backend.usage.limits().then((r) => { this.limitRows = r || []; this.refresh(); });
+    };
     this.updInstall = () => { if (this.backend.update) this.backend.update.install(); };
     this.updLater = () => { const u = this.state.upd || {}; this.setState({ updHidden: u.state + (u.version ? ' ' + u.version : '') }); };
     // 설정 화면(계정 키·사전 점검, 실행 폴더 설치, 진행 기록)은 본창 위에 겹쳐 뜬다.
@@ -834,7 +841,14 @@ class Component extends DCLogic {
         return { show, text, ready: u.state === 'ready', dot: u.state === 'error' ? '#f07a73' : '#5fd0b5' };
       })(),
       updInstall: this.updInstall, updLater: this.updLater,
-      pop: { folder: s.pop === 'folder', settings: s.pop === 'settings' },
+      pop: { folder: s.pop === 'folder', settings: s.pop === 'settings', limits: s.pop === 'limits' },
+      toggleLimits: this.toggleLimits,
+      limitRows: (this.limitRows || []).map((r) => ({
+        name: r.name, role: r.role, state: r.state, note: r.note, hasNote: Boolean(r.note),
+        stateColor: r.state === '연결됨' || r.state === '키 있음' ? '#5fd0b5' : (r.state === '모름' ? '#8a877f' : '#f07a73'),
+        meters: r.meters
+      })),
+      limitsLoading: this.limitRows === null,
       popL: Math.round(s.lpX + s.lpW + 8), popR: Math.round(s.rpR + s.rpW + 8),
       toggleFolder: this.toggleFolder, toggleSettings: this.toggleSettings, closePop: this.closePop,
       lpX: Math.round(s.lpX), lpY: Math.round(s.lpY), lpW: Math.round(s.lpW),

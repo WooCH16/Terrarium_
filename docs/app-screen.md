@@ -60,7 +60,8 @@
 
 ## 5. 위쪽 칸의 값
 
-- **사용량:** 앱은 코디네이터를 띄울 때 `--settings <앱 데이터>/coordinator-settings.json`으로 statusline 명령 하나를 더합니다(`app/lib/statusline.mjs`). Claude Code가 statusline에 주는 JSON에서 `rate_limits.five_hour`, `rate_limits.seven_day`, `context_window.used_percentage`, 모델 이름, 버전만 골라 `<앱 데이터>/coordinator-status.json`에 씁니다. 한도 값은 Claude Pro·Max 구독에서, 세션의 첫 응답 뒤에만 옵니다. 값이 없으면 "사용량 모름"으로 보입니다. 실행 폴더의 훅·권한 설정은 건드리지 않습니다.
+- **사용량:** 앱은 코디네이터를 띄울 때 `--settings <앱 데이터>/coordinator-settings.json`으로 statusline 명령 하나를 더합니다(`app/lib/statusline.mjs`). Claude Code가 statusline에 주는 JSON에서 `rate_limits.five_hour`, `rate_limits.seven_day`, `context_window.used_percentage`, 모델 이름, 버전만 골라 `<앱 데이터>/coordinator-status.json`에 씁니다. 한도 값은 Claude Pro·Max 구독에서, 세션의 첫 응답 뒤에만 옵니다. 값이 없으면 "첫 답 뒤 표시"로 보입니다. 관제탑은 이 파일을 3초마다 읽습니다. 실행 폴더의 훅·권한 설정은 건드리지 않습니다.
+- **계정별 한도(사용량 단추를 누름):** 연결된 계정마다 읽을 수 있는 한도만 보입니다(`app/lib/limits.mjs`, `limits:get`). Claude는 위 statusline 값(5시간·주간·컨텍스트), GitHub는 `gh api rate_limit`의 REST API 남은 횟수(1분 기억)를 막대로 보입니다. Pi(anthropic·meta)는 `pi auth check --json --no-refresh`의 연결 상태(5분 기억), Gemini·Jev는 키 보관 여부만 보입니다. 이 넷은 제공사가 남은 한도를 알려 주는 길이 없어 막대를 그리지 않고 그렇게 적습니다. 키 값과 자격 증명은 읽지 않습니다.
 - **계정:** GitHub 로그인 이름(`gh api user`, 5분 기억), 실행 폴더의 지정 저장소, 사전 점검 통과 여부.
 - **워커 모델:** 하네스가 이슈마다 정합니다(Jev 라우팅). 화면에서는 보기만 합니다.
 

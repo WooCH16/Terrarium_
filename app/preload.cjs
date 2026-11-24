@@ -37,7 +37,7 @@ contextBridge.exposeInMainWorld('terrarium', {
     install: () => ipcRenderer.invoke('update:install'),
     onStatus: (fn) => listen('update:status', fn),
   },
-  usage: { get: () => ipcRenderer.invoke('usage:get') },
+  usage: { get: () => ipcRenderer.invoke('usage:get'), limits: () => ipcRenderer.invoke('limits:get') },
   account: { get: () => ipcRenderer.invoke('account:get') },
   folders: {
     list: () => ipcRenderer.invoke('folders:list'),
