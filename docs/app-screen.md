@@ -84,7 +84,7 @@
 
 ## 7-1. 업데이트 알림
 
-설치판(`app.isPackaged`)에서만 켭니다. 코드는 `app/lib/updater.mjs`(`UpdateNotifier`)이고, `electron-updater` 6이 GitHub 릴리스(`package.json`의 `build.publish`: `WooCH16/Terrarium_`, prerelease 포함)를 읽습니다.
+설치판(`app.isPackaged`)에서만 켭니다. 코드는 `app/lib/updater.mjs`(`UpdateNotifier`)이고, `electron-updater` 6이 GitHub 릴리스(`package.json`의 `build.publish`: `WooCH16/Terrarium_`)를 읽습니다. 미리보기 버전(`-beta.n`) 설치판은 미리보기와 정식 릴리스 가운데 가장 새것을, 정식 버전 설치판은 정식 릴리스만 받습니다(electron-updater가 버전의 꼬리표로 정함).
 
 - **확인:** 앱을 켜고 10초 뒤, 그 뒤 6시간마다. 확인에 실패하면(오프라인 등) 조용히 넘어가고 다음 확인 때 다시 봅니다.
 - **받기:** 새 버전이 있으면 뒤에서 받습니다. 관제탑 위쪽 가운데에 "새 버전(…)이 있습니다. 받는 중… n%"를 띄웁니다. 받다가 실패하면 그렇다고 알립니다.

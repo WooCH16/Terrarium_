@@ -1,7 +1,7 @@
 {
   "name": "terrarium-desktop",
   "productName": "Terrarium",
-  "version": "0.2.0-beta.5",
+  "version": "0.2.0",
   "description": "Terrarium 하네스 데스크톱 앱 (관제탑 화면: 코디네이터 터미널과 하달된 만큼만 뜨는 오퍼레이터·워커 창, 계정 연결, 실행 폴더 설치, 진행 기록)",
   "license": "MIT",
   "private": true,
@@ -70,7 +70,7 @@
         "provider": "github",
         "owner": "WooCH16",
         "repo": "Terrarium_",
-        "releaseType": "prerelease"
+        "releaseType": "release"
       }
     ],
     "nsis": {
