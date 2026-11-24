@@ -310,6 +310,8 @@ class Component extends DCLogic {
       this.coordSt = ev.status;
     } else if (ev.type === 'coordinator.log') {
       this.log(ev.text, tones[ev.tone] || tones.info);
+      // 새 지시는 화면을 비우지 않는다(세션은 그대로). 코디네이터의 지금 할 일만 바꾼다.
+      if (ev.tone === 'user' && /^❯ /.test(ev.text || '')) this.task = ev.text.slice(2);
     } else if (ev.type === 'session.spawned') {
       const added = this.addDef(ev.session);
       const d = this.defs.find((x) => x.id === (ev.session || {}).id);

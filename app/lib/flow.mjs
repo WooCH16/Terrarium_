@@ -13,8 +13,9 @@
 // Jev 불빛(jev.active): 어드바이저 쪽은 조언 판정(run-reviewer --advice → advice-log), 오퍼레이터 쪽은 리뷰어 판정
 // (코디네이터의 run-reviewer --issue, 다음 도구 사용까지)과 워커 모델 라우팅(workers.jsonl start, 잠깐).
 //
-// 한 번의 "실행"(화면의 run): 사용자가 코디네이터에 한 줄을 보냈을 때 도는 세션이 없으면 새로 시작한다(화면을 비운다).
-// 사용자가 치지 않았는데 새 세션이 생기면(앱을 늦게 켰거나 코디네이터가 이어서 일함) 그때 시작한다.
+// 실행(화면의 run): 실행 폴더를 연 뒤 사용자가 처음 한 줄을 보내거나 새 세션이 처음 생길 때 연다. 그 뒤로는 새 지시가 와도
+// 화면을 비우지 않는다: 남은 세션은 그대로 두고 새로 생긴 세션만 더하며, 끝난 세션은 하나씩 사라진다(차례마다 끝 판정만 다시 센다).
+// 화면을 비우는 것은 실행 폴더를 바꿀 때뿐이다.
 // 기준점: 앱을 켤 때와 새 실행을 시작할 때, 그때까지 끝난 기록은 다시 그리지 않는다. 도는 하달은 이어서 그린다.
 import { existsSync, readFileSync } from 'node:fs';
 import { readHandoffs, pidAlive } from './status.mjs';
@@ -100,7 +101,8 @@ export class FlowTracker {
     this.mark = null; // 기준점 { guard, advice, done: Set<하달 이름> }
     this.sessions = new Map(); // id → { role, status, out, parentId, doneAt }
     this.gone = new Set(); // 끝나서 사라진 세션 id(같은 기록으로 다시 띄우지 않는다)
-    this.spawned = 0; // 이번 실행에서 띄운 세션 수(사라진 것 포함)
+    this.spawned = 0; // 이번 차례에 띄운 세션 수(사라진 것 포함)
+    this.turnIds = new Set(); // 이번 차례에 띄운 세션 id
     this.jev = { adv: false, ops: false };
     this.infos = new Map(); // id → 화면에 보낸 세션 정보(다시 보낼 때 쓴다)
     this.advisors = []; // 이번 실행의 어드바이저 id(호출 순서)
@@ -131,6 +133,7 @@ export class FlowTracker {
     this.infos = new Map();
     this.gone = new Set();
     this.spawned = 0;
+    this.turnIds = new Set();
     this.jev = { adv: false, ops: false };
     this.advisors = [];
     this.pendingAdvisors = [];
@@ -175,9 +178,25 @@ export class FlowTracker {
   userLine(text) {
     const t = cut(String(text ?? '').trim(), 120);
     if (!t) return;
-    if (this.runId && this.active()) { this.log(`❯ ${t}`, 'user'); this.setStatus(this.status === 'DONE' ? 'THINKING' : this.status); return; }
+    // 실행이 이미 있으면 화면을 비우지 않는다: 남은 세션(도는 것, 오류로 끝난 것)은 그대로 두고 새 차례만 센다.
+    // 새 차례에 생긴 세션은 지금 화면에 더해지고, 끝난 세션은 원래대로 하나씩 사라진다.
+    if (this.runId) {
+      this.text = t;
+      this.log(`❯ ${t}`, 'user');
+      this.newTurn();
+      if (!this.active()) this.setStatus('THINKING');
+      return;
+    }
     if (this.snapshot) this.mark = this.markOf(this.snapshot, { keepRunning: true });
     this.startRun(t);
+    this.lastCoordinatorAt = this.now();
+  }
+
+  // 사용자의 새 차례: 끝 판정과 "세션 없이 답한 차례" 판정을 이 차례 기준으로 다시 센다.
+  newTurn() {
+    this.spawned = 0;
+    this.turnIds = new Set();
+    this.finished = false;
     this.lastCoordinatorAt = this.now();
   }
 
@@ -188,6 +207,7 @@ export class FlowTracker {
     this.sessions.set(session.id, { role: session.role, status: 'SPAWNING', out: '', parentId: session.parentId ?? null, doneAt: 0 });
     this.infos.set(session.id, session);
     this.spawned += 1;
+    this.turnIds.add(session.id);
     this.send('session.spawned', { session });
     if (status && status !== 'SPAWNING') this.setSession(session.id, status);
     if (out) this.output(session.id, out);
@@ -328,7 +348,7 @@ export class FlowTracker {
       this.setStatus('DONE');
       if (!this.finished) {
         this.finished = true;
-        const errors = [...this.sessions.values()].filter((s) => s.status === 'ERROR').length;
+        const errors = [...this.sessions].filter(([id, s]) => this.turnIds.has(id) && s.status === 'ERROR').length;
         this.log(errors ? `✗ 하위 세션 ${errors}개가 오류로 끝남` : '✓ 모든 하위 세션 완료', errors ? 'error' : 'success');
         this.jevOff('adv');
         this.jevOff('ops');

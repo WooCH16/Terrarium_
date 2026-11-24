@@ -593,9 +593,11 @@ async function smoke(dir) {
     check('Jev 판정 때 Jev 불빛이 켜진다(조언 판정 → 어드바이저 쪽, 리뷰어 판정 → 오퍼레이터 쪽)', jevSeen.adv && jevSeen.ops && jevEv.some((e) => e.side === 'adv' && e.on) && jevEv.slice(reviewAt).some((e) => e.side === 'ops' && e.on && !e.ms), { jevSeen, jevEv: jevEv.map((e) => e.type === 'jev.active' ? `${e.side}:${e.on}${e.ms ? ':' + e.ms : ''}` : 'review') });
     await shot('04-done');
 
-    // ---- 하위 세션 없는 차례: 새 실행, 세션 0, 대기로 돌아감 ----
+    // ---- 하위 세션 없는 차례: 화면을 비우지 않음, 새 세션 0, 대기로 돌아감 ----
+    const startsBefore = flowLog.filter((e) => e.type === 'run.started').length;
     await typeInTerminal('지금 상태 알려줘');
     await wait(1500);
+    check('새 지시는 화면을 처음부터 다시 그리지 않는다(새 실행 없이 이어 감)', flowLog.filter((e) => e.type === 'run.started').length === startsBefore && flowLog.some((e) => e.type === 'coordinator.log' && e.text === '❯ 지금 상태 알려줘'));
     d = await debug();
     check('하위 세션 없이 답한 차례에는 세션이 뜨지 않는다', d.sessions.length === 0, d.sessions.map((s) => s.id));
     d = await until(async () => { const x = await debug(); return x && x.coordSt === 'READY' ? x : null; }, 10000);

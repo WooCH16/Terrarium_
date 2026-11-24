@@ -121,7 +121,7 @@ test('흐름: 앱을 켜기 전에 끝난 하달은 다시 그리지 않고, 도
   assert.equal(events[0].type, 'run.started', '사용자가 치지 않아도 새 세션이 생기면 실행을 연다');
 });
 
-test('흐름: 하위 세션 없이 답한 차례는 세션 0, 잠잠해지면 READY. 도는 세션이 있을 때 친 줄은 화면을 비우지 않는다', () => {
+test('흐름: 하위 세션 없이 답한 차례는 세션 0, 잠잠해지면 READY. 새로 친 줄은 화면을 비우지 않는다', () => {
   const run = makeRun();
   const clock = { t: T0 };
   const H = harnessOf(run, clock);
@@ -143,7 +143,8 @@ test('흐름: 하위 세션 없이 답한 차례는 세션 0, 잠잠해지면 RE
   const runs = events.filter((e) => e.type === 'run.started').length;
   f.userLine('응 계속');
   tick();
-  assert.equal(events.filter((e) => e.type === 'run.started').length, runs, '도는 하달이 있으면 새 실행을 열지 않는다');
+  assert.equal(runs, 1, '대기 상태에서 친 새 지시도 새 실행을 열지 않는다(화면을 비우지 않음)');
+  assert.equal(events.filter((e) => e.type === 'run.started').length, runs, '도는 하달이 있을 때도 마찬가지');
   assert.ok(events.some((e) => e.type === 'coordinator.log' && e.text === '❯ 응 계속'));
 });
 
@@ -206,4 +207,40 @@ test('흐름: 조언이 Jev를 통과하면 어드바이저는 사라지고, 다
   H.guard({ tool_name: 'Bash', summary: 'git status' });
   tick();
   assert.deepEqual(jev(), [true, false], '코디네이터가 다음 도구를 쓰면 판정은 끝');
+});
+
+test('흐름: 새 지시가 와도 남은 세션은 그대로 있고, 새 세션만 더해진다(오류 창 유지, 어드바이저 번호 이어 감)', () => {
+  const run = makeRun();
+  const clock = { t: T0 };
+  const H = harnessOf(run, clock);
+  const { f, events, tick } = tracker(run, clock, () => false);
+  f.reset(readFlowSnapshot(run));
+  f.userLine('첫 지시');
+  H.guard({ tool_name: 'Agent', summary: '조언' });
+  H.guard({ tool_name: 'Bash', summary: 'node h/operator/run-operator.mjs --issues 1' });
+  H.dispatch('h1', { team: 'dev', requested: [1], live: [1], endedAt: iso(clock.t), sessionOk: true });
+  H.worker('h1', { event: 'start', issue: 1, model: 'claude' });
+  H.worker('h1', { event: 'end', issue: 1, status: '막힘', attempts: 3, model: 'claude' });
+  tick();
+  clock.t += 6000;
+  tick();
+  assert.equal(f.status, 'DONE');
+  const removedBefore = events.filter((e) => e.type === 'session.removed').map((e) => e.id);
+  assert.deepEqual(removedBefore, ['adv-1'], '오류 워커와 그 오퍼레이터는 남는다');
+  const n = events.length;
+  f.userLine('두 번째 지시');
+  H.guard({ tool_name: 'Agent', summary: '두 번째 조언' });
+  tick();
+  const after = events.slice(n);
+  assert.ok(!after.some((e) => e.type === 'run.started' || e.type === 'session.removed'), '화면을 비우지도, 남은 창을 빼지도 않는다');
+  assert.deepEqual(spawned(after).map((x) => x.id), ['adv-2'], '새 세션만 더한다');
+  assert.equal(f.status, 'DELEGATING');
+  assert.ok(f.sessions.has('op-h1') && f.sessions.has('wk-h1-1'), '앞 차례의 오류 창은 그대로');
+  // 이번 차례의 끝 판정은 이번 차례 세션만 센다
+  H.guard({ tool_name: 'Read', summary: 'x' });
+  tick();
+  clock.t += 6000;
+  tick();
+  const finals = events.slice(n).filter((e) => e.type === 'coordinator.log').map((e) => e.text);
+  assert.ok(finals.includes('✓ 모든 하위 세션 완료'), finals.join(' | '));
 });
