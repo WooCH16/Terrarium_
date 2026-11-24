@@ -76,9 +76,26 @@
       return true;
     });
     // 입력은 그대로 코디네이터에 간다(보낸 줄을 화면 기록에 남기는 일은 메인 프로세스가 한다).
+    // 코디네이터가 떠 있으면 /testgo는 메인 프로세스가 가로챈다(app/lib/testgo.mjs). 없을 때도 여기서 받아 화면 시험을 띄운다.
+    let offLine = '';
     term.onData((d) => {
       if (state === 'running') { T.input(d); return; }
       if (state === 'starting') return;
+      if (offLine || d.charAt(0) === '/') {
+        for (const ch of d) {
+          if (ch === '\r') {
+            const l = offLine.trim();
+            offLine = '';
+            term.write('\r\n');
+            if (l === '/testgo') T.testgo();
+            else term.write(AMBER + '코디네이터가 떠 있지 않아 보내지 못했습니다: ' + l + OFF + '\r\n');
+          } else if (ch === '\x7f' || ch === '\b') {
+            if (offLine) { offLine = offLine.slice(0, -1); term.write('\b \b'); }
+          } else if (ch === '\x1b' || ch === '\x03') { offLine = ''; term.write('\r\n'); break; }
+          else if (ch >= ' ') { offLine += ch; term.write(ch); }
+        }
+        return;
+      }
       if (d === '\r') start();
       else if (state === 'ended' && (d === 'n' || d === 'N')) start({ fresh: true });
       else if (d === 's' || d === 'S') T.openSettings('accounts');

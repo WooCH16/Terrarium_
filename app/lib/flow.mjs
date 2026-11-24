@@ -8,6 +8,10 @@
 //   오퍼레이터 = 하달 한 번(handoffs/h<N>, dispatch.json의 팀). 팀이 없는 옛 하달도 하달이면 보인다.
 //   워커       = workers.jsonl의 start 한 줄(이슈 하나). 모델을 못 골라 end만 남은 이슈는 워커가 아니다.
 // 그래서 하달하지 않은 팀의 오퍼레이터, 하달에 없는 이슈의 워커는 화면에 나오지 않는다.
+// 일이 끝난 세션은 잠깐(lingerMs) ✓를 보인 뒤 사라진다(session.removed): 어드바이저는 조언이 Jev를 통과하면,
+// 워커는 이슈가 끝나면, 오퍼레이터는 하달이 끝나고 그 워커가 다 사라지면. 오류로 끝난 세션은 남긴다. 다시 부르면 새로 뜬다.
+// Jev 불빛(jev.active): 어드바이저 쪽은 조언 판정(run-reviewer --advice → advice-log), 오퍼레이터 쪽은 리뷰어 판정
+// (코디네이터의 run-reviewer --issue, 다음 도구 사용까지)과 워커 모델 라우팅(workers.jsonl start, 잠깐).
 //
 // 한 번의 "실행"(화면의 run): 사용자가 코디네이터에 한 줄을 보냈을 때 도는 세션이 없으면 새로 시작한다(화면을 비운다).
 // 사용자가 치지 않았는데 새 세션이 생기면(앱을 늦게 켰거나 코디네이터가 이어서 일함) 그때 시작한다.
@@ -17,6 +21,13 @@ import { readHandoffs, pidAlive } from './status.mjs';
 
 export const TEAM_NAMES = { dev: '개발', design: '디자인', tester: '테스터', plan: '기획', sec: '보안' };
 const QUIET_MS = 20000; // 코디네이터가 이만큼 도구를 쓰지 않고 세션도 다 끝났으면 실행을 끝난 것으로 본다
+const LINGER_MS = 5000; // 끝난 세션이 ✓를 보이고 사라지기까지
+
+// 오퍼레이터 창 이름: 맡은 팀. 팀이 없는 하달은 조사·작업으로 부른다.
+export function operatorLabel(team, research = false) {
+  if (team) return `${TEAM_NAMES[team] ?? team} Operator`;
+  return research ? '조사 Operator' : 'Operator';
+}
 
 const readLines = (file) => {
   if (!existsSync(file)) return [];
@@ -79,14 +90,18 @@ function operatorStatus(h) {
 
 export class FlowTracker {
   // emit(event): 화면에 이벤트 하나를 보낸다. now: 시험에서 바꾼다.
-  constructor({ emit, now = () => Date.now(), quietMs = QUIET_MS }) {
+  constructor({ emit, now = () => Date.now(), quietMs = QUIET_MS, lingerMs = LINGER_MS }) {
     this.emit = emit;
     this.now = now;
     this.quietMs = quietMs;
+    this.lingerMs = lingerMs;
     this.seq = 0;
     this.runId = null;
     this.mark = null; // 기준점 { guard, advice, done: Set<하달 이름> }
-    this.sessions = new Map(); // id → { role, status, out }
+    this.sessions = new Map(); // id → { role, status, out, parentId, doneAt }
+    this.gone = new Set(); // 끝나서 사라진 세션 id(같은 기록으로 다시 띄우지 않는다)
+    this.spawned = 0; // 이번 실행에서 띄운 세션 수(사라진 것 포함)
+    this.jev = { adv: false, ops: false };
     this.infos = new Map(); // id → 화면에 보낸 세션 정보(다시 보낼 때 쓴다)
     this.advisors = []; // 이번 실행의 어드바이저 id(호출 순서)
     this.pendingAdvisors = []; // 아직 끝나지 않은 어드바이저 id
@@ -114,6 +129,9 @@ export class FlowTracker {
   clearRun() {
     this.sessions = new Map();
     this.infos = new Map();
+    this.gone = new Set();
+    this.spawned = 0;
+    this.jev = { adv: false, ops: false };
     this.advisors = [];
     this.pendingAdvisors = [];
     this.advisorSeenSinceSpawn = false;
@@ -121,6 +139,19 @@ export class FlowTracker {
   }
 
   send(type, payload = {}) { this.emit({ type, runId: this.runId, ...payload }); }
+  // Jev 불빛. ms가 있으면 그만큼만 켰다가 저절로 꺼진다(화면이 끈다).
+  jevOn(side, ms) {
+    this.ensureRun();
+    if (ms) { this.send('jev.active', { side, on: true, ms }); return; }
+    if (this.jev[side]) return;
+    this.jev[side] = true;
+    this.send('jev.active', { side, on: true });
+  }
+  jevOff(side) {
+    if (!this.jev[side]) return;
+    this.jev[side] = false;
+    this.send('jev.active', { side, on: false });
+  }
   log(text, tone = 'info') { this.send('coordinator.log', { text, tone }); }
   setStatus(s) {
     if (this.status === s) return;
@@ -154,8 +185,9 @@ export class FlowTracker {
 
   spawn(session, status, out) {
     this.ensureRun();
-    this.sessions.set(session.id, { role: session.role, status: 'SPAWNING', out: '' });
+    this.sessions.set(session.id, { role: session.role, status: 'SPAWNING', out: '', parentId: session.parentId ?? null, doneAt: 0 });
     this.infos.set(session.id, session);
+    this.spawned += 1;
     this.send('session.spawned', { session });
     if (status && status !== 'SPAWNING') this.setSession(session.id, status);
     if (out) this.output(session.id, out);
@@ -165,6 +197,7 @@ export class FlowTracker {
     if (!s || s.status === status) return;
     s.status = status;
     s.out = '';
+    s.doneAt = status === 'DONE' ? this.now() : 0;
     // 세션이 끝난 때부터 잠잠함을 센다: 하달 동안 코디네이터는 run-operator를 기다리느라 도구를 쓰지 않는다.
     if (status === 'DONE' || status === 'ERROR') this.lastCoordinatorAt = Math.max(this.lastCoordinatorAt, this.now());
     this.send('session.status', { id, status });
@@ -192,14 +225,17 @@ export class FlowTracker {
       const t = Date.parse(row.time) || this.now();
       if (row.agent_type === 'advisor') {
         this.advisorSeenSinceSpawn = true;
+        const reviewing = /Jev 조언 판정/.test(advisorActivity(row));
+        if (reviewing) this.jevOn('adv');
         for (const id of this.pendingAdvisors) {
-          this.setSession(id, /Jev 조언 판정/.test(advisorActivity(row)) ? 'REVIEWING' : 'WORKING');
+          this.setSession(id, reviewing ? 'REVIEWING' : 'WORKING');
           this.output(id, advisorActivity(row));
         }
         continue;
       }
       if (row.agent_type) continue; // 다른 하위 에이전트(없어야 한다)
       this.lastCoordinatorAt = Math.max(this.lastCoordinatorAt, t);
+      this.jevOff('ops'); // 리뷰어 판정은 코디네이터가 다음 도구를 쓸 때 끝나 있다
       if (row.tool_name === 'Agent' || row.tool_name === 'Task') {
         // 같은 차례에 여러 번 부르면(병렬) 앞의 어드바이저는 아직 돈다. 그 사이 어드바이저 일이 있었으면 앞의 것은 끝났다.
         if (this.advisorSeenSinceSpawn) this.finishAdvisors();
@@ -217,6 +253,7 @@ export class FlowTracker {
       if (this.pendingAdvisors.length) this.finishAdvisors();
       const note = row.allow === false ? null : coordinatorNote(row);
       if (note) { this.ensureRun(); this.log(note.text, note.tone); }
+      if (row.allow !== false && /run-reviewer\.mjs\s+--issue/.test(String(row.summary ?? ''))) this.jevOn('ops');
     }
 
     // ---- advice-log.jsonl: Jev의 조언 판정 ----
@@ -226,15 +263,22 @@ export class FlowTracker {
       if (!v || typeof v !== 'object') continue;
       this.ensureRun();
       const ok = v.verdict === '허용';
+      this.jevOn('adv');
       this.log(`${ok ? '←' : '✗'} Jev 조언 판정: ${v.verdict ?? '?'} · ${cut(String(v.adviceId ?? ''), 30)}`, ok ? 'advisor' : 'error');
+      this.jevOff('adv');
       const id = this.pendingAdvisors[this.pendingAdvisors.length - 1] ?? this.advisors[this.advisors.length - 1];
-      if (id) this.output(id, `Jev 판정: ${v.verdict ?? '?'}`);
+      if (id && this.sessions.has(id)) {
+        this.output(id, `Jev 판정: ${v.verdict ?? '?'}`);
+        // 조언이 통과하면 그 어드바이저는 할 일이 없다: 끝내고(잠시 뒤 사라짐) 기다리는 목록에서 뺀다.
+        if (ok) { this.setSession(id, 'DONE'); this.output(id, '✓ 조언 통과 · 코디네이터에 넘김'); this.pendingAdvisors = this.pendingAdvisors.filter((x) => x !== id); }
+      }
     }
 
     // ---- handoffs: 오퍼레이터와 워커 ----
     const hs = snapshot.handoffs.filter((h) => !this.mark.done.has(h.name)).sort((a, b) => num(a.name) - num(b.name));
     for (const h of hs) {
       const opId = `op-${h.name}`;
+      if (this.gone.has(opId)) continue; // 끝나서 사라진 하달
       const team = h.team ?? h.dispatch?.team ?? null;
       const research = (h.mode ?? h.dispatch?.mode) === 'research';
       // 하달 직후에는 dispatch.json의 live가 아직 null이다(이슈를 거르는 중). 그때는 요청된 이슈를 보인다(run-18 h26에서 "이슈 없음"으로 뜸).
@@ -242,14 +286,16 @@ export class FlowTracker {
       const out = (h.dispatch?.excluded ?? []).map((x) => `#${x.issue} 빠짐(${x.reason})`);
       const list = [...issues.map((n) => `#${n}`), ...out].join(', ') || '없음';
       if (!this.sessions.has(opId)) {
-        const label = `${team ? `${TEAM_NAMES[team] ?? team} ` : ''}Operator · ${h.name}`;
-        this.spawn({ id: opId, role: 'operator', parentId: null, label, model: 'claude', task: `${research ? '조사' : '작업'} 하달 · 이슈 ${list}` });
-        this.log(`→ ${label} 하달 · 이슈 ${list}`, 'operator');
+        const label = operatorLabel(team, research);
+        this.spawn({ id: opId, role: 'operator', parentId: null, label, team, handoff: h.name, model: 'claude', task: `${h.name} ${research ? '조사' : '작업'} 하달 · 이슈 ${list}` });
+        this.log(`→ ${label} · ${h.name} 하달 · 이슈 ${list}`, 'operator');
       }
       const workers = h.workers ?? [];
       for (const w of workers) {
         const wid = `wk-${h.name}-${w.issue}`;
+        if (this.gone.has(wid)) continue;
         if (!this.sessions.has(wid)) {
+          this.jevOn('ops', 2500); // 워커 모델은 Jev 라우팅이 골랐다
           this.spawn({ id: wid, role: 'worker', parentId: opId, label: `Worker #${w.issue}`, model: w.model ?? 'claude', task: `이슈 #${w.issue}` }, 'WORKING');
           this.log(`→ Worker #${w.issue} 호출 · ${w.model ?? '모델 모름'}`, 'worker');
         }
@@ -269,11 +315,13 @@ export class FlowTracker {
       if (os !== before && (os === 'DONE' || os === 'ERROR')) this.log(`${os === 'DONE' ? '←' : '✗'} ${h.name} 하달 끝 · 워커 ${n}명`, os === 'DONE' ? 'operator' : 'error');
     }
 
+    this.sweep();
+
     // ---- 코디네이터 상태 ----
     if (!this.runId) return;
     if (this.active()) { this.finished = false; this.setStatus('DELEGATING'); return; }
     const quiet = this.now() - this.lastCoordinatorAt > this.quietMs;
-    if (this.sessions.size === 0) {
+    if (this.spawned === 0) {
       // 하위 세션 없이 끝난 차례(질문에 답하기 등): 코디네이터가 잠잠해지면 대기로 돌아간다.
       this.setStatus(quiet ? 'READY' : 'THINKING');
     } else if (quiet) {
@@ -282,10 +330,25 @@ export class FlowTracker {
         this.finished = true;
         const errors = [...this.sessions.values()].filter((s) => s.status === 'ERROR').length;
         this.log(errors ? `✗ 하위 세션 ${errors}개가 오류로 끝남` : '✓ 모든 하위 세션 완료', errors ? 'error' : 'success');
+        this.jevOff('adv');
+        this.jevOff('ops');
         this.send('run.finished', { ok: true });
       }
     } else {
       this.setStatus('THINKING'); // 하위 세션은 끝났고 코디네이터가 아직 일한다(판정·합치기·보고)
+    }
+  }
+
+  // 끝나고 lingerMs가 지난 세션을 화면에서 뺀다. 오퍼레이터는 그 워커가 다 사라진 뒤에(오류 워커가 있으면 남는다).
+  sweep() {
+    const now = this.now();
+    const ripe = (s) => s.status === 'DONE' && now - s.doneAt >= this.lingerMs;
+    const remove = (id) => { this.sessions.delete(id); this.infos.delete(id); this.gone.add(id); this.send('session.removed', { id }); };
+    for (const [id, s] of [...this.sessions]) if (s.role !== 'operator' && ripe(s)) remove(id);
+    for (const [id, s] of [...this.sessions]) {
+      if (s.role !== 'operator' || !ripe(s)) continue;
+      if ([...this.sessions.values()].some((c) => c.parentId === id)) continue;
+      remove(id);
     }
   }
 
@@ -307,5 +370,6 @@ export class FlowTracker {
       if (s.status !== 'SPAWNING') send('session.status', { id, status: s.status });
       if (s.out) send('session.output', { id, text: s.out });
     }
+    for (const side of ['adv', 'ops']) if (this.jev[side]) send('jev.active', { side, on: true });
   }
 }

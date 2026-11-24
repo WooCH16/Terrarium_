@@ -37,6 +37,8 @@ const r = spawnSync(electron, ['.'], {
     TERRARIUM_SMOKE: out,
     TERRARIUM_FAKE_CLAUDE: join(here, 'fake-coordinator.mjs'),
     TERRARIUM_FLOW_QUIET_MS: '3000',
+    TERRARIUM_FLOW_LINGER_MS: '2000',
+    TERRARIUM_TESTGO_MS: '15000',
   },
 });
 let results = [];

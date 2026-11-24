@@ -259,12 +259,27 @@ class Component extends DCLogic {
     if (role === 'wk' && !(parent && parent.role === 'op')) role = 'op'; // workers need an operator parent
     const d = {
       id: info.id, role, label: info.label || info.id, op: role === 'wk' ? parent.id : null,
-      parent: role === 'wk' ? parent.label : 'Coordinator', model: info.model || null, task: info.task || ''
+      parent: role === 'wk' ? parent.label : (info.handoff ? 'Coordinator · ' + info.handoff : 'Coordinator'),
+      model: info.model || null, task: info.task || ''
     };
     this.defs.push(d);
     this.ns[d.id] = { on: false, st: '', out: '' };
     this.initNode(d);
     return true;
+  }
+  /** 일이 끝난 세션을 뺀다(session.removed). 흐리게 사라진 뒤 자리를 다시 잡는다. 그 아래 워커도 같이 뺀다. */
+  removeDef(id) {
+    const ids = this.defs.filter((d) => d.id === id || d.op === id).map((d) => d.id);
+    if (!ids.length) return;
+    ids.forEach((k) => { if (this.ns[k]) this.ns[k].on = false; this.opPanel[k] = false; });
+    this.timers.push(setTimeout(() => {
+      this.defs = this.defs.filter((d) => !ids.includes(d.id));
+      ids.forEach((k) => { delete this.ns[k]; delete this.off[k]; delete this.sz[k]; delete this.nodeGrab[k]; delete this.nodeRs[k]; delete this.nodeTap[k]; });
+      const has = (r) => (this.defs.some((d) => d.role === r) ? 1 : 0);
+      this.links = { adv: has('adv'), ops: has('op'), work: has('wk') };
+      this.fitTree();
+      this.refresh();
+    }, 400));
   }
   /** Reduce one orchestrator event (types: src/shared/contract.js) into UI state. */
   onEvent(ev) {
@@ -308,11 +323,15 @@ class Component extends DCLogic {
       const d = this.defs.find((x) => x.id === ev.id);
       if (!d) return;
       this.ns[d.id] = { on: true, st: ev.status, out: '' };
-      const role = d.role === 'adv' ? 'adv' : (d.role === 'op' ? 'ops' : null);
-      if (ev.status === 'DONE' && role) {
-        this.jevUntil[role] = Date.now() + 1400;
-        this.timers.push(setTimeout(() => this.refresh(), 1450));
-      }
+    } else if (ev.type === 'session.removed') {
+      this.removeDef(ev.id);
+    } else if (ev.type === 'jev.active') {
+      // Jev 판정 동안 불빛을 켠다. ms가 있으면 그만큼, 없으면 꺼짐 이벤트가 올 때까지(최대 2분). 꺼질 때는 2.5초 여운.
+      const k = ev.side === 'adv' ? 'adv' : 'ops';
+      const now = Date.now();
+      this.jevUntil[k] = ev.on ? now + (ev.ms || 120000) : Math.min(this.jevUntil[k], now + 2500);
+      const wait = this.jevUntil[k] - now + 50;
+      if (wait > 0) this.timers.push(setTimeout(() => this.refresh(), wait));
     } else if (ev.type === 'session.output') {
       const n = this.ns[ev.id];
       if (n) n.out = ev.text || '';
@@ -345,7 +364,10 @@ class Component extends DCLogic {
     const pos = {};
     const opX = {};
     advs.forEach((d, i) => { const k = d.id; pos[k] = { x: ax + o(k).x, y: dy + centred(i, advs.length, 240) + o(k).y, w: W(k, AW), h: H(k, AH) }; });
-    ops.forEach((d, i) => { const k = d.id; opX[k] = dx + centred(i, ops.length, 640); pos[k] = { x: opX[k] + o(k).x, y: oy + o(k).y, w: W(k, OW), h: H(k, OH) }; });
+    // 오퍼레이터 칸 너비는 그 아래 워커 줄이 들어갈 만큼(워커가 많은 팀끼리 겹치지 않게).
+    const opSpan = ops.map((d) => Math.max(640, wks.filter((x) => x.op === d.id).length * 205 + 60));
+    let opCur = dx - opSpan.reduce((a, b) => a + b, 0) / 2;
+    ops.forEach((d, i) => { const k = d.id; opX[k] = opCur + opSpan[i] / 2; opCur += opSpan[i]; pos[k] = { x: opX[k] + o(k).x, y: oy + o(k).y, w: W(k, OW), h: H(k, OH) }; });
     ops.forEach((op) => {
       const mine = wks.filter((d) => d.op === op.id);
       const po = o(op.id);
@@ -541,7 +563,8 @@ class Component extends DCLogic {
       win: { dx: this.state.dx, dy: this.state.dy, w: this.state.w, h: this.state.h },
       pop: this.state.pop, ws: this.state.ws.length, folder: this.state.folder,
       opPanels: Object.keys(this.opPanel).filter((k) => this.opPanel[k]),
-      dragging: !!this.drag, panning: !!this.pan, term: this.termState
+      dragging: !!this.drag, panning: !!this.pan, term: this.termState,
+      jev: { adv: Date.now() < this.jevUntil.adv, ops: Date.now() < this.jevUntil.ops }
     });
     // 사용량·계정·코디네이터 정보는 메인 프로세스가 실제로 읽은 것만 준다. 30초마다 다시 읽는다.
     const pull = () => {
@@ -736,7 +759,7 @@ class Component extends DCLogic {
     const jevNow = Date.now();
     const jev = (role, j, rgb, hex, rot) => {
       const on = jevNow < (this.jevUntil || {})[role];
-      const shown = this.links[role] ? 1 : 0;
+      const shown = this.links[role] || on ? 1 : 0; // 세션이 사라진 뒤의 판정(리뷰어)도 보인다
       return {
         x: Math.round(j.x), y: Math.round(j.y), rot,
         op: shown ? (on ? 1 : 0.5) : 0, sc: on ? 1.12 : 1,

@@ -49,5 +49,7 @@ contextBridge.exposeInMainWorld('terrarium', {
     onExit: (fn) => listen('term:exit', fn),
     onRetry: (fn) => listen('term:retry', fn),
     openSettings: (tab) => ipcRenderer.invoke('settings:open', { tab }),
+    // /testgo: 화면 시험(가짜 세션 이벤트, 3분 뒤 원래 화면)
+    testgo: () => ipcRenderer.send('testgo:start'),
   },
 });

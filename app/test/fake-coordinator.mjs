@@ -43,7 +43,7 @@ async function dispatchScenario() {
   await sleep(700);
   logWorker(run, 'h1', { event: 'start', issue: 11, requestedModel: 'claude', model: 'claude', base: 'main', baseCommit: 'a'.repeat(40) }, now);
   logWorker(run, 'h1', { event: 'start', issue: 12, requestedModel: 'gemini', model: 'gemini', base: 'main', baseCommit: 'a'.repeat(40) }, now);
-  await sleep(2200);
+  await sleep(4000);
   logWorker(run, 'h1', { event: 'end', issue: 11, attempts: 1, model: 'claude', status: '완료' }, now);
   logWorker(run, 'h1', { event: 'end', issue: 12, attempts: 1, model: 'gemini', status: '완료' }, now);
   await sleep(400);

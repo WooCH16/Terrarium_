@@ -12,6 +12,7 @@ import { CoordinatorTerminal, coordinatorEnv } from './lib/terminal.mjs';
 import { KeyStore, KEY_NAMES, KEY_LABELS } from './lib/keys.mjs';
 import { readStatus } from './lib/status.mjs';
 import { FlowTracker, readFlowSnapshot } from './lib/flow.mjs';
+import { testgoTimeline, scanTestgo } from './lib/testgo.mjs';
 import { install, checkInstallInput, originRepo } from './lib/install.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -255,9 +256,12 @@ let blankSeq = 0;
 const flowLog = app.isPackaged ? null : []; // 스모크 시험이 보낸 이벤트 전체를 본다(화면 기록은 6줄만 남는다)
 const quietMs = !app.isPackaged && process.env.TERRARIUM_FLOW_QUIET_MS ? Number(process.env.TERRARIUM_FLOW_QUIET_MS) : undefined;
 function currentRunOrNull() { const r = readPrefs().currentRun; return allowedRun(r) ? r : null; }
+const lingerMs = !app.isPackaged && process.env.TERRARIUM_FLOW_LINGER_MS ? Number(process.env.TERRARIUM_FLOW_LINGER_MS) : undefined;
 function resetFlow() {
+  stopTestgo(false);
   flowRun = currentRunOrNull();
-  flow = new FlowTracker({ emit: (ev) => { if (flowLog) flowLog.push(ev); toTower('orchestrator:event', ev); }, quietMs });
+  // 화면 시험(/testgo) 동안은 진짜 흐름을 계속 세기만 하고 화면에는 보내지 않는다. 끝나면 지금 상태를 다시 보낸다(replay).
+  flow = new FlowTracker({ emit: (ev) => { if (flowLog) flowLog.push(ev); if (!testgo) toTower('orchestrator:event', ev); }, quietMs, lingerMs });
   // 화면을 비운다(앞 실행 폴더의 세션이 남지 않게).
   toTower('orchestrator:event', { type: 'run.started', runId: `blank-${++blankSeq}`, text: '' });
   if (flowRun) flow.reset(readFlowSnapshot(flowRun));
@@ -272,6 +276,32 @@ function startFlow() {
     try { flow.update(readFlowSnapshot(run)); } catch { /* 기록을 쓰는 중에 읽음: 다음 차례에 다시 읽는다 */ }
   }, POLL_MS);
 }
+// ---- /testgo: 화면 시험 (app/lib/testgo.mjs) ----
+// 코디네이터 터미널에 /testgo를 치면 코디네이터에는 보내지 않고, 가짜 세션 이벤트를 화면에만 보낸다(기본 3분).
+// 하네스·모델을 부르지 않고 실행 폴더에 쓰지 않는다. 끝나면 시험 전 화면(진짜 흐름의 지금 상태)으로 돌아간다.
+let testgo = null;
+const testgoMs = !app.isPackaged && process.env.TERRARIUM_TESTGO_MS ? Number(process.env.TERRARIUM_TESTGO_MS) : 180000;
+function startTestgo() {
+  stopTestgo(false);
+  const d = testgoMs;
+  const timeline = testgoTimeline({ runId: `testgo-${++blankSeq}`, durationMs: d, stepMs: Math.min(4000, d / 30), jevEveryMs: Math.min(12000, d / 6), jevMs: Math.min(4000, d / 12) });
+  const send = (ev) => { if (flowLog) flowLog.push(ev); toTower('orchestrator:event', ev); };
+  testgo = { timers: timeline.map(({ at, ev }) => setTimeout(() => (ev.type === 'test.end' ? stopTestgo(true) : send(ev)), at)) };
+}
+function stopTestgo(restore) {
+  if (!testgo) return;
+  testgo.timers.forEach(clearTimeout);
+  testgo = null;
+  if (!restore) return;
+  if (flowLog) flowLog.push({ type: 'test.end' });
+  const blank = `blank-${++blankSeq}`;
+  toTower('orchestrator:event', { type: 'run.started', runId: blank, text: '' });
+  toTower('orchestrator:event', { type: 'coordinator.status', runId: blank, status: flow?.status ?? 'READY' });
+  flow?.replay();
+}
+ipcMain.on('testgo:start', () => startTestgo());
+let testLine = '';
+
 // 코디네이터에 보낸 줄(대략): Enter로 보낼 때 화면 기록에 한 줄 남기고, 도는 세션이 없으면 새 실행을 연다.
 let typed = '';
 function noteInput(data) {
@@ -386,8 +416,10 @@ ipcMain.handle('term:start', async (_e, { fresh = false, cols, rows } = {}) => {
 });
 ipcMain.on('term:input', (_e, data) => {
   if (typeof data !== 'string' || data.length > 100000) return;
-  term?.write(data);
-  if (term) noteInput(data);
+  const r = scanTestgo(testLine, data);
+  testLine = r.line;
+  if (r.forward) { term?.write(r.forward); if (term) noteInput(r.forward); }
+  if (r.fire) startTestgo();
 });
 ipcMain.on('term:resize', (_e, { cols, rows } = {}) => term?.resize(cols, rows));
 ipcMain.handle('settings:open', (_e, { tab } = {}) => { openSettings(['accounts', 'install', 'progress'].includes(tab) ? tab : 'accounts'); return { ok: true }; });
@@ -520,36 +552,46 @@ async function smoke(dir) {
     await click(prof.x, prof.y);
 
     // ---- 하달: 코디네이터 터미널에 지시 → 필요한 만큼만 세션이 뜬다 ----
+    // Jev 불빛은 화면 상태를 짧게 자주 읽어 본다(켜진 적이 있는지).
+    const jevSeen = { adv: false, ops: false };
+    const jevPoll = setInterval(() => { debug().then((x) => { if (x?.jev?.adv) jevSeen.adv = true; if (x?.jev?.ops) jevSeen.ops = true; }).catch(() => {}); }, 150);
+    const logFrom = flowLog.length;
     await typeInTerminal('정렬 기능 하달해줘');
-    d = await until(async () => { const x = await debug(); return x && x.sessions.some((s) => s.role === 'wk' && s.st === 'WORKING') ? x : null; }, 12000);
+    d = await until(async () => { const x = await debug(); return x && x.sessions.filter((s) => s.role === 'wk' && s.st === 'WORKING').length === 2 ? x : null; }, 12000);
     check('하달하면 워커가 일하는 중으로 뜬다', Boolean(d), d && d.sessions.map((s) => `${s.id}:${s.st}`));
-    await wait(300);
-    await shot('03-running');
-    d = await until(async () => { const x = await debug(); return x && x.coordSt === 'DONE' ? x : null; }, 20000);
-    d = d ?? await debug();
-    const ids = d.sessions.map((s) => s.id).sort();
-    const want = ['adv-1', 'op-h1', 'op-h2', 'wk-h1-11', 'wk-h1-12'];
-    check('딱 필요한 세션만 뜬다: 어드바이저 1, 하달한 팀의 오퍼레이터 2(개발·테스터), 하달 이슈의 워커 2', JSON.stringify(ids) === JSON.stringify(want), ids);
-    const by = Object.fromEntries(d.sessions.map((s) => [s.id, s]));
-    check('워커는 자기 하달의 오퍼레이터 아래에 붙는다', by['wk-h1-11']?.parent === 'op-h1' && by['wk-h1-12']?.parent === 'op-h1', d.sessions.map((s) => `${s.id}<${s.parent}`));
-    check('하달하지 않은 팀(디자인·기획·보안)의 오퍼레이터는 없다', !d.sessions.some((s) => /디자인|기획|보안/.test(s.label)), d.sessions.map((s) => s.label));
-    check('워커 모델은 하네스가 정한 값이다(claude, gemini)', by['wk-h1-11']?.model === 'claude' && by['wk-h1-12']?.model === 'gemini');
-    check('모든 세션이 끝나고 코디네이터가 DONE', d.sessions.every((s) => s.st === 'DONE') && d.coordSt === 'DONE', { coord: d.coordSt, st: d.sessions.map((s) => `${s.id}:${s.st}`) });
-    const live = await js(`(document.querySelector('[role="toolbar"][aria-label="Status"]').textContent.match(/(\\d+) live/) || [])[1]`);
-    check('live 수가 0으로 돌아온다', live === '0', live);
-    const flowText = flowLog.filter((e) => e.type === 'coordinator.log').map((e) => e.text);
-    const order = [/Advisor 호출/, /Jev 조언 판정: 허용/, /개발 Operator · h1 하달/, /Worker #11 호출/, /테스터 Operator · h2 하달/, /Jev 리뷰어 판정 · 이슈 #11/, /모든 하위 세션 완료/].map((re) => flowText.findIndex((t) => re.test(t)));
-    check('화면 기록에 흐름이 순서대로 남는다(어드바이저 → Jev 조언 판정 → 하달 → 워커 → 둘째 하달 → 리뷰어 → 완료)', order.every((i, k) => i >= 0 && (k === 0 || i > order[k - 1])), { order, flowText });
-    await shot('04-done');
-    // 오퍼레이터 두 번 누르기 → 그 하달의 워커 목록(읽기 전용)
-    const op1 = await rectOf('[aria-label="개발 Operator · h1"] > div');
+    // 오퍼레이터 두 번 누르기 → 그 하달의 워커 목록(읽기 전용). 끝나면 창이 사라지므로 도는 동안 본다.
+    const op1 = await rectOf('[aria-label="개발 Operator"] > div');
     if (op1) {
       await click(op1.x, op1.y); await click(op1.x, op1.y);
       await wait(300);
       const rows = await js(`document.querySelectorAll('[role="dialog"][aria-label$="workers"] [title="모델은 하네스 라우팅(Jev)이 정합니다"]').length`);
       check('오퍼레이터를 두 번 누르면 그 하달의 워커 2명이 보인다(모델은 읽기 전용)', rows === 2, rows);
-      await shot('05-operator-panel');
+      await shot('03-running');
     } else check('오퍼레이터를 두 번 누르면 그 하달의 워커 2명이 보인다(모델은 읽기 전용)', false, '오퍼레이터 창 없음');
+    d = await until(async () => { const x = await debug(); return x && x.coordSt === 'DONE' ? x : null; }, 25000);
+    d = d ?? await debug();
+    const runEvents = flowLog.slice(logFrom);
+    const infos = runEvents.filter((e) => e.type === 'session.spawned').map((e) => e.session);
+    const ids = infos.map((s) => s.id).sort();
+    const want = ['adv-1', 'op-h1', 'op-h2', 'wk-h1-11', 'wk-h1-12'];
+    check('딱 필요한 세션만 뜬다: 어드바이저 1, 하달한 팀의 오퍼레이터 2(개발·테스터), 하달 이슈의 워커 2', JSON.stringify(ids) === JSON.stringify(want), ids);
+    const by = Object.fromEntries(infos.map((s) => [s.id, s]));
+    check('워커는 자기 하달의 오퍼레이터 아래에 붙는다', by['wk-h1-11']?.parentId === 'op-h1' && by['wk-h1-12']?.parentId === 'op-h1', infos.map((s) => `${s.id}<${s.parentId}`));
+    check('오퍼레이터 이름은 맡은 팀이다(개발 Operator, 테스터 Operator). 하달하지 않은 팀(디자인·기획·보안)은 없다', by['op-h1']?.label === '개발 Operator' && by['op-h2']?.label === '테스터 Operator' && !infos.some((s) => /디자인|기획|보안/.test(s.label)), infos.map((s) => s.label));
+    check('워커 모델은 하네스가 정한 값이다(claude, gemini)', by['wk-h1-11']?.model === 'claude' && by['wk-h1-12']?.model === 'gemini');
+    await wait(800);
+    d = await debug();
+    const removed = runEvents.concat(flowLog.slice(logFrom + runEvents.length)).filter((e) => e.type === 'session.removed').map((e) => e.id).sort();
+    check('일이 끝난 세션(조언 통과한 어드바이저, 끝난 워커·오퍼레이터)은 화면에서 사라진다', d.sessions.length === 0 && JSON.stringify(removed) === JSON.stringify(want) && d.coordSt === 'DONE', { left: d.sessions.map((s) => s.id), removed, coord: d.coordSt });
+    const live = await js(`(document.querySelector('[role="toolbar"][aria-label="Status"]').textContent.match(/(\\d+) live/) || [])[1]`);
+    check('live 수가 0으로 돌아온다', live === '0', live);
+    const flowText = flowLog.filter((e) => e.type === 'coordinator.log').map((e) => e.text);
+    const order = [/Advisor 호출/, /Jev 조언 판정: 허용/, /개발 Operator · h1 하달/, /Worker #11 호출/, /테스터 Operator · h2 하달/, /Jev 리뷰어 판정 · 이슈 #11/, /모든 하위 세션 완료/].map((re) => flowText.findIndex((t) => re.test(t)));
+    check('화면 기록에 흐름이 순서대로 남는다(어드바이저 → Jev 조언 판정 → 하달 → 워커 → 둘째 하달 → 리뷰어 → 완료)', order.every((i, k) => i >= 0 && (k === 0 || i > order[k - 1])), { order, flowText });
+    const jevEv = runEvents.filter((e) => e.type === 'jev.active' || (e.type === 'coordinator.log' && /Jev 리뷰어 판정/.test(e.text)));
+    const reviewAt = jevEv.findIndex((e) => e.type === 'coordinator.log');
+    check('Jev 판정 때 Jev 불빛이 켜진다(조언 판정 → 어드바이저 쪽, 리뷰어 판정 → 오퍼레이터 쪽)', jevSeen.adv && jevSeen.ops && jevEv.some((e) => e.side === 'adv' && e.on) && jevEv.slice(reviewAt).some((e) => e.side === 'ops' && e.on && !e.ms), { jevSeen, jevEv: jevEv.map((e) => e.type === 'jev.active' ? `${e.side}:${e.on}${e.ms ? ':' + e.ms : ''}` : 'review') });
+    await shot('04-done');
 
     // ---- 하위 세션 없는 차례: 새 실행, 세션 0, 대기로 돌아감 ----
     await typeInTerminal('지금 상태 알려줘');
@@ -559,6 +601,29 @@ async function smoke(dir) {
     d = await until(async () => { const x = await debug(); return x && x.coordSt === 'READY' ? x : null; }, 10000);
     check('코디네이터가 잠잠해지면 READY로 돌아간다', d && d.coordSt === 'READY', d && d.coordSt);
     await shot('06-answer-only');
+
+    // ---- /testgo: 화면 시험(어드바이저 3, 오퍼레이터 5, 워커 한 명씩 늘어남, Jev 번갈아, 정해진 시간 뒤 원래 화면) ----
+    const tgFrom = flowLog.length;
+    jevSeen.adv = false; jevSeen.ops = false;
+    await typeInTerminal('/testgo');
+    const counts = [];
+    const tgEnd = Date.now() + 25000;
+    while (Date.now() < tgEnd && !flowLog.slice(tgFrom).some((e) => e.type === 'test.end')) {
+      const x = await debug();
+      if (x) counts.push({ adv: x.sessions.filter((s) => s.role === 'adv').length, op: x.sessions.filter((s) => s.role === 'op').length, wk: x.sessions.filter((s) => s.role === 'wk').length, labels: x.sessions.filter((s) => s.role === 'op').map((s) => s.label) });
+      if (counts.length === 40) await shot('07-testgo');
+      await wait(250);
+    }
+    const maxOf = (k) => Math.max(0, ...counts.map((c) => c[k]));
+    const wkSeq = counts.map((c) => c.wk);
+    check('/testgo: 어드바이저 3명과 다섯 팀 오퍼레이터가 모두 뜬다', maxOf('adv') === 3 && maxOf('op') === 5 && JSON.stringify(counts.find((c) => c.op === 5)?.labels) === JSON.stringify(['개발 Operator', '디자인 Operator', '테스터 Operator', '기획 Operator', '보안 Operator']), { adv: maxOf('adv'), op: maxOf('op'), labels: counts.find((c) => c.op === 5)?.labels });
+    check('/testgo: 워커는 한 명씩 늘어 15명이 된다(줄지 않음)', maxOf('wk') === 15 && wkSeq.every((n, i) => i === 0 || n >= wkSeq[i - 1]) && new Set(wkSeq).size >= 8, wkSeq.join(','));
+    check('/testgo: Jev가 번갈아 켜진다', jevSeen.adv && jevSeen.ops, jevSeen);
+    check('/testgo: 코디네이터에는 보내지 않는다', !flowLog.slice(tgFrom).some((e) => e.type === 'coordinator.log' && e.text === '❯ /testgo'));
+    await wait(600);
+    d = await debug();
+    check('/testgo: 정해진 시간이 지나면 시험 전 화면으로 돌아간다(세션 0, READY)', flowLog.slice(tgFrom).some((e) => e.type === 'test.end') && d.sessions.length === 0 && d.coordSt === 'READY', { sessions: d.sessions.length, coord: d.coordSt });
+    clearInterval(jevPoll);
 
     // ---- 설정 화면: 저장 확인 흐름(예전 시험 그대로) ----
     const attached = () => win.contentView.children.includes(settingsView);

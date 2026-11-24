@@ -83,8 +83,9 @@ test('흐름: 하달한 팀의 오퍼레이터와 하달 이슈의 워커만 뜬
     ['wk-h1-12', 'worker', 'op-h1'],
     ['op-h2', 'operator', null],
   ]);
-  assert.equal(s[1].label, '개발 Operator · h1');
-  assert.equal(s[4].label, '테스터 Operator · h2');
+  assert.equal(s[1].label, '개발 Operator', '오퍼레이터 이름은 맡은 팀');
+  assert.equal(s[4].label, '테스터 Operator');
+  assert.equal(s[1].handoff, 'h1');
   assert.deepEqual([s[2].model, s[3].model], ['claude', 'gemini'], '모델은 하네스 기록 그대로');
   assert.deepEqual(['wk-h1-11', 'wk-h1-12', 'op-h1', 'op-h2'].map((id) => lastStatus(events, id)), ['DONE', 'ERROR', 'DONE', 'DONE']);
   assert.match(events.filter((e) => e.type === 'session.output' && e.id === 'op-h2').at(-1).text, /워커 없이/);
@@ -93,6 +94,13 @@ test('흐름: 하달한 팀의 오퍼레이터와 하달 이슈의 워커만 뜬
   tick(); tick();
   assert.equal(f.status, 'DONE');
   assert.equal(events.filter((e) => e.type === 'run.finished').length, 1);
+  // 끝난 세션은 잠시 뒤 사라진다. 오류 워커(#12)와 그 오퍼레이터(h1)는 남는다.
+  const removed = events.filter((e) => e.type === 'session.removed').map((e) => e.id).sort();
+  assert.deepEqual(removed, ['adv-1', 'op-h2', 'wk-h1-11']);
+  // Jev 불빛: 조언 판정 동안 어드바이저 쪽, 워커 라우팅 때 오퍼레이터 쪽
+  const jev = events.filter((e) => e.type === 'jev.active').map((e) => `${e.side}:${e.on}${e.ms ? `:${e.ms}` : ''}`);
+  assert.deepEqual(jev.slice(0, 2), ['adv:true', 'adv:false']);
+  assert.ok(jev.includes('ops:true:2500'), jev.join(' '));
   assert.ok(events.every((e) => e.runId === events[0].runId), '한 실행의 이벤트는 같은 runId');
 });
 
@@ -166,4 +174,36 @@ test('흐름: 멈춘 하달·끊긴 하달은 오류, 같은 차례에 병렬로
   const again = events.slice(before);
   assert.equal(again[0].type, 'run.started');
   assert.deepEqual(spawned(again).map((x) => x.id), ['adv-1', 'adv-2', 'op-h1', 'op-h2']);
+});
+
+test('흐름: 조언이 Jev를 통과하면 어드바이저는 사라지고, 다시 부르면 새로 뜬다. 리뷰어 판정 동안 오퍼레이터 쪽 Jev가 켜진다', () => {
+  const run = makeRun();
+  const clock = { t: T0 };
+  const H = harnessOf(run, clock);
+  const { f, events, tick } = tracker(run, clock, () => false);
+  f.reset(readFlowSnapshot(run));
+  f.userLine('조언 받고 리뷰해줘');
+  H.guard({ tool_name: 'Agent', summary: '첫 조언' });
+  H.guard({ agent_type: 'advisor', tool_name: 'Bash', summary: 'node h/operator/run-reviewer.mjs --advice a.md --advice-id a1' });
+  tick();
+  assert.equal(lastStatus(events, 'adv-1'), 'REVIEWING');
+  H.advice('허용');
+  tick();
+  assert.equal(lastStatus(events, 'adv-1'), 'DONE', '조언이 통과하면 끝');
+  clock.t += 4000;
+  tick();
+  assert.ok(!events.some((e) => e.type === 'session.removed'), '잠깐은 ✓를 보인다');
+  clock.t += 2000;
+  tick();
+  assert.deepEqual(events.filter((e) => e.type === 'session.removed').map((e) => e.id), ['adv-1']);
+  H.guard({ tool_name: 'Agent', summary: '두 번째 조언' });
+  tick();
+  assert.deepEqual(spawned(events).map((x) => x.id), ['adv-1', 'adv-2'], '다시 부르면 새 어드바이저가 뜬다');
+  H.guard({ tool_name: 'Bash', summary: 'node h/operator/run-reviewer.mjs --issue 7' });
+  tick();
+  const jev = () => events.filter((e) => e.type === 'jev.active' && e.side === 'ops').map((e) => e.on);
+  assert.deepEqual(jev(), [true], '리뷰어 판정 중');
+  H.guard({ tool_name: 'Bash', summary: 'git status' });
+  tick();
+  assert.deepEqual(jev(), [true, false], '코디네이터가 다음 도구를 쓰면 판정은 끝');
 });

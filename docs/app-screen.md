@@ -10,19 +10,21 @@
 |---|---|---|
 | 가운데 코디네이터 창 | 진짜 Claude Code 코디네이터 터미널(대화형, 실행 폴더에서 뜸). 창 아래 한 줄은 최근 흐름 기록 | `node-pty` + xterm(`app/tower/terminal.js`), 흐름 기록은 아래 이벤트 |
 | 오른쪽 ADVISORS | 코디네이터가 부른 어드바이저 하나당 창 하나 | `guard.log` |
-| 아래 OPERATORS | 하달 한 번(`handoffs/h<N>`)당 창 하나, 이름은 그 하달의 팀 | `handoffs/h<N>/dispatch.json`, `session.json` |
+| 아래 OPERATORS | 하달 한 번(`handoffs/h<N>`)당 창 하나. 이름은 맡은 팀(개발·디자인·테스터·기획·보안 Operator), 팀이 없는 하달은 `Operator`(조사 하달은 `조사 Operator`). 하달 번호는 창의 `from Coordinator · h<N>` 줄에 | `handoffs/h<N>/dispatch.json`, `session.json` |
 | 그 아래 WORKERS | 그 하달에서 워커를 부른 이슈 하나당 창 하나, 모델은 하네스가 고른 값 | `handoffs/h<N>/workers.jsonl`의 `start` |
-| JEV 표시 | 어드바이저·오퍼레이터가 끝날 때 잠깐 켜짐(리뷰어 Jev 판정 자리) | 화면이 이벤트에서 계산 |
+| JEV 표시 | Jev가 판정하는 동안 켜짐. 어드바이저 쪽: 조언 판정(`run-reviewer --advice` → `advice-log.jsonl`). 오퍼레이터 쪽: 리뷰어 판정(코디네이터의 `run-reviewer --issue`, 코디네이터가 다음 도구를 쓸 때까지)과 워커 모델 라우팅(워커가 뜰 때 2.5초) | `jev.active` 이벤트 |
 | 왼쪽 위 | [처음 화면], 실행 폴더 단추(목록, 다른 폴더 열기), 열어 둔 실행 폴더 탭 | 앱 설정(`prefs.json`)의 실행 폴더 목록 |
 | 오른쪽 위 | live 수, 시각, 사용량, 톱니(설정 요약 → [설정 열기]), 프로필(계정 관리, 진행 기록) | statusline 파일, `gh api user`, 실행 폴더의 `harness.json` |
 
 하달하지 않은 팀의 오퍼레이터, 하달에 없는 이슈의 워커는 화면에 나오지 않습니다. 미리 자리를 잡지 않고 실제로 생긴 세션만 그립니다.
 
+일이 끝난 세션은 ✓를 5초 보인 뒤 사라집니다: 어드바이저는 조언이 Jev를 통과하면(또는 코디네이터에 돌아오면), 워커는 이슈가 `완료`로 끝나면, 오퍼레이터는 하달이 끝나고 그 아래 워커가 다 사라지면. 오류로 끝난 세션(막힌 워커와 그 오퍼레이터, 멈춘·끊긴 하달)은 남깁니다. 다시 부르면 새 창으로 뜹니다.
+
 ## 2. 기록 → 세션
 
 | 세션 | 생기는 때 | 상태 |
 |---|---|---|
-| 어드바이저 `adv-<k>` | 코디네이터(`agent_type` 없음)의 `Agent` 도구 줄. 코디네이터는 advisor만 부를 수 있다(policy.mjs) | 어드바이저 줄이 오면 WORKING, `run-reviewer --advice`면 REVIEWING. 코디네이터가 Agent 아닌 도구를 다시 쓰면 DONE |
+| 어드바이저 `adv-<k>` | 코디네이터(`agent_type` 없음)의 `Agent` 도구 줄. 코디네이터는 advisor만 부를 수 있다(policy.mjs) | 어드바이저 줄이 오면 WORKING, `run-reviewer --advice`면 REVIEWING. Jev 조언 판정이 `허용`이거나 코디네이터가 Agent 아닌 도구를 다시 쓰면 DONE |
 | 오퍼레이터 `op-h<N>` | 앱을 켠 뒤(또는 새 실행 뒤) 새로 생긴 하달 폴더, 또는 앱을 켤 때 도는 하달 | 세션 프로세스가 살아 있으면 WORKING, 끝난 시각이 있으면 DONE(`sessionOk: false`면 ERROR), 멈춤(`stopped.json`)·끊김(프로세스 없음)은 ERROR |
 | 워커 `wk-h<N>-<이슈>` | `workers.jsonl`의 `start` 줄. 모델을 못 골라 `end`만 있는 이슈는 워커가 아니다 | `end`가 없으면 WORKING, `end`의 상태가 `완료`면 DONE, 그 밖(막힘, 실패)은 ERROR |
 
@@ -49,7 +51,9 @@
 | `session.spawned` | `session`: `{ id, role, parentId, label, model, task }` | 창이 뜬다(SPAWNING) |
 | `session.status` | `id`, `status`: SPAWNING, REVIEWING, WORKING, DONE, ERROR | 창의 상태 표시 |
 | `session.output` | `id`, `text` | 창의 활동 한 줄(다음 상태 변화에 지워짐) |
-| `run.finished` | `ok` | 실행 하나가 끝남(한 번만) |
+| `session.removed` | `id` | 끝난 세션 창이 흐려지며 사라지고 자리를 다시 잡는다(그 아래 워커도) |
+| `jev.active` | `side`(adv, ops), `on`, `ms`(있으면 그만큼만 켬) | JEV 표시가 켜진다. `on: false`면 2.5초 뒤 꺼진다 |
+| `run.finished` | `ok` | 실행 하나가 끝남(한 번만). Jev 표시도 끈다 |
 
 `role`은 `advisor`, `operator`, `worker`이고, 워커의 `parentId`는 그 하달의 오퍼레이터 id입니다. 화면을 다시 읽으면(창 다시 읽기) 메인 프로세스가 지금 실행의 세션과 상태를 다시 보냅니다(`FlowTracker.replay`).
 
@@ -66,12 +70,21 @@
 - 오퍼레이터 창 두 번 누르기: 그 하달의 워커와 모델, 상태.
 - 코디네이터 터미널은 화면 배율을 되돌려 늘 1배로 그립니다. 축소해도 글자가 흐려지지 않고 마우스 선택 위치가 맞습니다. 배율이 바뀌면 터미널 칸 수가 바뀝니다.
 
-## 7. 시험
+## 7. 화면 시험 `/testgo`
 
-- `cd app && npm test`: 기록 → 이벤트(`test/flow.test.mjs`). 기록은 하네스의 기록 함수(`writeDispatch`, `logWorker`)로 씁니다.
-- `cd app && npm run smoke`: 진짜 앱 창을 띄우고 입력 이벤트로 움직입니다. 코디네이터는 가짜(`test/fake-coordinator.mjs`)라 모델·네트워크·GitHub를 부르지 않습니다. 하달 한 번에 딱 필요한 세션(어드바이저 1, 하달한 두 팀의 오퍼레이터, 워커 2)만 뜨는지, 하위 세션 없는 차례에는 아무것도 뜨지 않는지 등 27개를 봅니다. 결과와 그림은 `app/out/smoke/`.
+코디네이터 터미널에 `/testgo`를 치고 Enter를 누르면 화면 모양을 보는 시험이 3분 동안 돕니다(`app/lib/testgo.mjs`).
+
+- 그 줄은 코디네이터에 보내지 않습니다(친 글자는 지웁니다). 하네스·모델·GitHub를 부르지 않고 실행 폴더에 아무것도 쓰지 않습니다. 코디네이터가 떠 있지 않을 때도 됩니다.
+- 어드바이저 3명, 다섯 팀 오퍼레이터 전부가 뜨고, 워커는 4초마다 한 명씩 늘어납니다(n번째 팀 아래 n명, 모두 15명).
+- Jev 표시가 12초마다 어드바이저 쪽과 오퍼레이터 쪽을 번갈아 4초씩 켭니다.
+- 3분이 지나면 시험 전 화면으로 돌아갑니다. 시험 동안에도 진짜 기록은 계속 세고, 돌아올 때 지금 상태를 다시 그립니다. 다시 치면 처음부터 다시 돕니다.
+
+## 8. 시험
+
+- `cd app && npm test`: 기록 → 이벤트(`test/flow.test.mjs`), `/testgo` 시간표와 입력 가로채기(`test/testgo.test.mjs`). 기록은 하네스의 기록 함수(`writeDispatch`, `logWorker`)로 씁니다.
+- `cd app && npm run smoke`: 진짜 앱 창을 띄우고 입력 이벤트로 움직입니다. 코디네이터는 가짜(`test/fake-coordinator.mjs`)라 모델·네트워크·GitHub를 부르지 않습니다. 하달 한 번에 딱 필요한 세션(어드바이저 1, 하달한 두 팀의 오퍼레이터, 워커 2)만 뜨는지, 끝난 세션이 사라지는지, Jev 판정 때 Jev 표시가 켜지는지, 하위 세션 없는 차례에는 아무것도 뜨지 않는지, `/testgo`(짧게 15초로 돌림) 등 33개를 봅니다. 결과와 그림은 `app/out/smoke/`.
 - 실제 모델로 도는 종단 시험은 `harness/e2e/`(비용 발생)입니다.
 
-## 8. 예전 관제탑에서 빠진 것
+## 9. 예전 관제탑에서 빠진 것
 
 0.2.0에서 화면을 바꾸며 저장소 루트의 예전 관제탑(`index.html`, `css/`, `js/`, `assets/`)을 지웠습니다. 그와 함께 빠진 것: 오른쪽 폴더 패널(파일 트리, 수정 중 주황·완료 초록 표시, 폭 조절·접기), 팀 상세·통합·사무실(픽셀 그림) 보기, 늘 다섯 자리인 역할 카드, 브라우저 미리보기(목 데이터). 하달과 이슈 진행은 설정 화면의 진행 기록 탭에 그대로 있습니다.
