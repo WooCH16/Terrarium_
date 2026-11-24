@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## [0.2.0-beta.5] - 2026-11-24 (미리보기, beta 브랜치)
+
+릴리스 노트: [docs/releases/v0.2.0-beta.5.md](docs/releases/v0.2.0-beta.5.md).
+
 ### 추가
 
 - 계정별 한도 창: 관제탑 위쪽 사용량 단추를 누르면 연결된 계정마다 한도를 보입니다. Claude(5시간·주간·컨텍스트)와 GitHub(API 남은 횟수)는 막대로, Pi(anthropic·meta)·Gemini·Jev는 연결 상태와 "제공사가 남은 한도를 알려 주지 않습니다"를 보입니다.
