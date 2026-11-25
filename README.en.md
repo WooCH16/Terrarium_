@@ -27,10 +27,9 @@ To use this harness, **each user needs their own private GitHub repository (the 
 
 - **What it holds:** work issues, advisor proposals, reviewer verdicts, operator result reports, and record documents (`records/`).
 - **Why it must be private:** your instructions and the target project's content pile up there as written. If the repository is public, `setup`, `preflight`, and the coordinator stop and write nothing.
-- **One user only:** several people do not share one repository. A separate one per target project is best (reusing one makes the records look mixed up).
-- **Two ways to create it:**
-  - Yourself: `gh repo create <owner>/harness-issues --private`
-  - During setup: `node harness/setup.mjs --run <run folder> --create-repo` (without `--repo`, it uses `harness-issues` under your logged-in account; from the second target project on, give `--repo` a different name). It creates a private repository only when none exists; an existing public repository is left unchanged and setup stops. The app's install screen asks before creating a missing repository.
+- **One user only:** several people do not share one repository.
+- **You do not need to create it:** when setup runs without `--repo`, it creates `<your login>/harness-issues-<target project folder name>` as a private repository and prints the name. The second project works the same way. Reinstalling the same folder reuses its repository; an existing public repository is left unchanged and setup stops.
+- **To choose the name yourself:** pass `--repo <owner/name>` (add `--create-repo` if it does not exist). The app's install screen currently asks for a repository name and asks before creating a missing one.
 
 ## Two ways to use it: the app and the Claude CLI
 
@@ -87,15 +86,12 @@ Run the scripts in a terminal yourself, then start `claude` in the run folder an
 #    TYPESAFE_API_KEY=...      (required, reviewer and routing)
 #    GEMINI_API_KEY=...        (when using the gemini worker)
 
-# 2. Create a private designated repository and run the preflight check
-gh repo create <owner>/harness-issues --private
-node harness/preflight.mjs --repo <owner>/harness-issues
-#    If you will create it with --create-repo in step 3, the repository does not exist yet, so check without --repo
-#    node harness/preflight.mjs
+# 2. Preflight check (the designated repository is created in step 3)
+node harness/preflight.mjs
 
 # 3. Set up a run folder (without a target project, the sample memo program is used)
-node harness/setup.mjs --run C:/Users/<you>/my-run --repo <owner>/harness-issues --project C:/path/to/your/git/project
-#    If you did not create the repository in step 2, add --create-repo (it creates a private one only when none exists)
+node harness/setup.mjs --run C:/Users/<you>/my-run --project C:/path/to/your/git/project
+#    To choose the repository name yourself: --repo <owner/name> [--create-repo]
 
 # 4. Run: start the coordinator in the run folder (same settings the app uses)
 cd C:/Users/<you>/my-run
