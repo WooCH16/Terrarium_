@@ -1,6 +1,7 @@
 // 결과 보고서 초안: node result-draft.mjs --handoff h<N> --issue <n>
 // 이슈의 완료 기준을 글자 그대로 옮긴 표와 커밋 해시 줄을 채운 초안을 지정 저장소 클론의 .drafts/result-<n>-h<N>.md에 쓰고 그 경로 한 줄을 낸다.
-// 오퍼레이터는 충족·근거 위치 칸과 나머지 절만 채운다. 기준 칸은 고치지 않는다(리뷰어 코드 검사가 글자까지 비교한다, run-8 R8-2).
+// 사실 칸은 워커 기록과 git으로 증명되는 값만 미리 채운다(결정 8-42). 오퍼레이터는 확인하고, 충족·근거 위치 칸과 남은 <...> 자리만 채운다.
+// 기준 칸은 고치지 않는다(리뷰어 코드 검사가 글자까지 비교한다, run-8 R8-2).
 // 종료 코드: 0 성공, 2 인자·설정·이슈 읽기 실패.
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -12,7 +13,55 @@ import { REPORT_HEAD, REPORT_SECTIONS, REPORT_TABLE, ACTUAL_WORKER_MODEL } from 
 const fwd = (p) => String(p).replace(/\\/g, '/').replace(/\/+$/, '');
 const cell = (s) => String(s).replace(/\|/g, '\\|');
 
-export function draftText({ issue, criteria, commit }) {
+const FULL_SHA = /^[0-9a-f]{40}$/;
+const sha = (v) => (typeof v === 'string' && FULL_SHA.test(v) ? v : null);
+
+// 사실 칸(결정 8-42): 이 하달의 워커 기록(handoffs/h<N>/workers.jsonl)과 git에서 기록으로 증명되는 값만 채운다.
+// 기록이 없거나 모자라면 그 자리는 null(초안에서 빈칸 <...>)이다. 오퍼레이터 편집 여부는 기록으로 증명할 수 없어 늘 빈칸이다.
+export function factsFrom(events, issue, { commit = null, git = null } = {}) {
+  const mine = events.filter((e) => e && e.issue === issue && (e.event === 'start' || e.event === 'end'));
+  const starts = mine.filter((e) => e.event === 'start');
+  const ends = mine.filter((e) => e.event === 'end');
+  if (starts.length === 0 || ends.length === 0) return null;
+  const first = starts[0];
+  const last = starts.at(-1);
+  const end = ends.at(-1);
+  const requested = typeof last.requestedModel === 'string' ? last.requestedModel : null;
+  const model = typeof end.model === 'string' ? end.model : typeof last.model === 'string' ? last.model : null;
+  const reason = requested && model && requested === model ? '대체 없음' : typeof last.replacedReason === 'string' && last.replacedReason ? `대체 사유: ${last.replacedReason}` : null;
+  const attempts = ends.every((e) => Number.isInteger(e.attempts) && e.attempts >= 0) ? ends.reduce((n, e) => n + e.attempts, 0) : null;
+  let files = null;
+  let mainNow = null;
+  if (git) {
+    try { mainNow = sha(git(['rev-parse', '--verify', 'refs/heads/main'])); } catch { /* 빈칸 */ }
+    if (commit && sha(first.baseCommit)) {
+      try { files = git(['diff', '--name-only', '--no-renames', first.baseCommit, commit]).split(/\r?\n/).map((l) => l.trim()).filter(Boolean); } catch { /* 빈칸 */ }
+    }
+  }
+  const mainStart = events.map((e) => (e?.event === 'start' ? sha(e.mainBefore) : null)).find(Boolean) ?? null;
+  return { requested, model, reason, attempts, done: end.status === '완료', files, mainStart, mainNow };
+}
+
+function factLines(f) {
+  const v = (x, hole) => (x === null || x === undefined ? hole : x);
+  if (!f) {
+    return [
+      '- 모델: <지정 모델> → <실제 모델> (대체 사유: run-worker 출력의 replacedReason, 없으면 "대체 없음")',
+      `- ${ACTUAL_WORKER_MODEL}: <run-worker 출력의 model 값>`,
+      '- 시도 횟수: <워커 시도 횟수>, 막힘 사유: <없으면 "없음">',
+      '- 사후 검사 자료: <변경 파일 목록, 하달 시작과 지금의 main 해시, 오퍼레이터 편집 여부>',
+    ];
+  }
+  const files = f.files === null ? '<변경 파일 목록>' : f.files.length ? f.files.join(', ') : '없음';
+  return [
+    `- 모델: ${v(f.requested, '<지정 모델>')} → ${v(f.model, '<실제 모델>')} (${v(f.reason, '대체 사유: <run-worker 출력의 replacedReason>')})`,
+    `- ${ACTUAL_WORKER_MODEL}: ${v(f.model, '<run-worker 출력의 model 값>')}`,
+    `- 시도 횟수: ${v(f.attempts, '<워커 시도 횟수>')}, 막힘 사유: ${f.done ? '없음' : '<막힘 사유>'}`,
+    `- 사후 검사 자료: 변경 파일 ${files}; main 하달 시작 ${v(f.mainStart, '<해시>')}, 지금 ${v(f.mainNow, '<해시>')}; 오퍼레이터 편집 여부: <있음 또는 없음>`,
+  ];
+}
+
+export function draftText({ issue, criteria, commit, facts = null }) {
   return [
     REPORT_HEAD,
     `커밋 해시: ${commit ?? '없음'}`,
@@ -26,10 +75,7 @@ export function draftText({ issue, criteria, commit }) {
     '<무엇을 바꿨나, 합친 커밋>',
     '',
     '### 사실 칸',
-    '- 모델: <지정 모델> → <실제 모델> (대체 사유: run-worker 출력의 replacedReason, 없으면 "대체 없음")',
-    `- ${ACTUAL_WORKER_MODEL}: <run-worker 출력의 model 값>`,
-    '- 시도 횟수: <워커 시도 횟수>, 막힘 사유: <없으면 "없음">',
-    '- 사후 검사 자료: <변경 파일 목록, 하달 시작과 지금의 main 해시, 오퍼레이터 편집 여부>',
+    ...factLines(facts),
     '',
     `### ${REPORT_SECTIONS[3]}`,
     '<없으면 "없음">',
@@ -54,8 +100,8 @@ export async function main(argv, env = process.env, deps = {}) {
   const criteria = issueCriteria(body);
   if (!criteria || criteria.length === 0) return fail(`이슈 #${issue}에 완료 기준 표(| 기준 | 확인 방법 |)가 없습니다.`);
   let commit = null;
+  const git = deps.git ?? ((args) => execFileSync('git', ['-C', fwd(config.targetProject), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim());
   try {
-    const git = deps.git ?? ((args) => execFileSync('git', ['-C', fwd(config.targetProject), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim());
     commit = git(['rev-parse', '--verify', `refs/heads/${handoff}/issue-${issue}`]);
     // 브랜치는 워크트리를 만들 때 기준 커밋에 생긴다. 끝이 main이나 다른 이슈 브랜치 끝과 같으면 워커가 커밋을 못 낸 것이다(fable 조언 2).
     const others = git(['for-each-ref', '--format=%(objectname)', 'refs/heads/main', `refs/heads/${handoff}/`]).split(/\r?\n/).filter(Boolean);
@@ -65,7 +111,12 @@ export async function main(argv, env = process.env, deps = {}) {
   const dir = `${fwd(config.issuesClone)}/.drafts`;
   mkdirSync(dir, { recursive: true });
   const file = `${dir}/result-${issue}-${handoff}.md`;
-  writeFileSync(file, draftText({ issue, criteria, commit }));
+  let events = [];
+  try {
+    events = readFileSync(`${run}/handoffs/${handoff}/workers.jsonl`, 'utf8').split(/\r?\n/).filter(Boolean)
+      .map((l) => { try { return JSON.parse(l); } catch { return null; } });
+  } catch { /* 기록이 없으면 사실 칸은 빈칸 */ }
+  writeFileSync(file, draftText({ issue, criteria, commit, facts: factsFrom(events, issue, { commit, git }) }));
   write(file);
   return 0;
 }

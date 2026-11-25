@@ -878,6 +878,10 @@ test('이어서(--answer yes): 오퍼레이터 결정과 앞 질문이 입력에
   assert.ok(!existsSync(`${s.run}/handoffs/h1/question-7.json`), '끝나면 질문 기록을 지운다');
   assert.ok(!existsSync(`${s.run}/${QFILE}`), '이어 할 때 앞 질문 파일을 지운다');
   assert.equal(workerLog(s).filter((e) => e.event === 'start').length, 2);
+  // 결정 8-42: 결과 보고서 초안이 사실 칸을 채우도록 시작·끝 기록에 main 해시를 남긴다.
+  const log = workerLog(s);
+  assert.ok(log.filter((e) => e.event === 'start').every((e) => e.mainBefore === rec.mainBefore && /^[0-9a-f]{40}$/.test(e.mainBefore)));
+  assert.ok(log.filter((e) => e.event === 'end').every((e) => e.mainAfter === rec.mainAfter));
 });
 
 test('이어서: 질문 기록이 없으면 종료 코드 2(같은 하달 재작업 통로가 아니다)', T, async () => {

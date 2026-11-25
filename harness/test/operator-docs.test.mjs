@@ -65,6 +65,16 @@ test('결정 8-41: 작업 절차는 명령 규칙을 맨 앞에 두고, 이슈�
   assert.doesNotMatch(w, /`harness\.json`에서 `harnessDir`을 읽고/);
 });
 
+test('결정 8-42: 초안이 사실 칸을 미리 채우고, 오퍼레이터는 Edit로 남은 자리만 채우며 허용되는 git 모양만 쓴다', () => {
+  const w = read('operator/skills/operator-work/SKILL.md');
+  assert.match(w, /사실 칸[^\n]*미리 채운다\(결정 8-42\)/);
+  assert.match(w, /파일 전체를 Write로 다시 쓰지 않는다/);
+  assert.match(w, /git -C <이슈 워크트리> show --stat <해시>/);
+  assert.match(w, /`diff-tree`는 훅이 막는다/);
+  assert.doesNotMatch(read('operator/AGENT.md'), /스크립트가 자동으로 채우지 않는다/);
+  assert.doesNotMatch(readFileSync(join(harnessDir, '..', 'docs', 'operator.md'), 'utf8'), /스크립트가 자동 생성하지 않는다/);
+});
+
 test('work.md: worker and enqueue steps, and no direct merge into main', () => {
   const w = read('operator/skills/operator-work/SKILL.md');
   assert.match(w, /run-worker/);
