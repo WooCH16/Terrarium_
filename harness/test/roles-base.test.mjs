@@ -126,6 +126,26 @@ test('parseTeam: 다섯 값은 읽고, 줄 없음·모르는 값·두 줄은 nul
   assert.equal(parseKind('x'), null);
 });
 
+// ---------- 세션 머리말: 이슈를 다시 읽지 않게(결정 8-41) ----------
+test('8-41: 세션 지침에 하네스 폴더와 넘긴 이슈의 본문·댓글이 들어가고, 뺀 이슈는 들어가지 않는다', T, async () => {
+  const f = setup();
+  const repo = fakeRepo({
+    5: { body: body({ team: 'dev' }).replace('## 목표\nx', '## 목표\nBODY-FIVE-MARK'), comments: [cm('COMMENT-FIVE-MARK')] },
+    6: { body: body({ team: 'dev', deps: [9] }).replace('## 목표\nx', '## 목표\nBODY-SIX-MARK') },
+    9: { body: body({ team: 'dev' }) },
+  });
+  const d = await dispatchOnly(f, repo, ['--issues', '5,6']);
+  const p = d.launched[0].prompt;
+  assert.match(p, new RegExp(`^- 하네스 폴더: ${f.harnessDir}$`, 'm'));
+  assert.match(p, /^===== #5 본문 =====$/m);
+  assert.ok(p.includes('BODY-FIVE-MARK'));
+  assert.ok(p.includes('COMMENT-FIVE-MARK'));
+  assert.match(p, /^===== #5 끝 =====$/m);
+  assert.deepEqual(d.launched[0].issues, [5]);
+  assert.ok(!p.includes('BODY-SIX-MARK'), `대기로 뺀 이슈는 넣지 않는다: ${p.slice(p.indexOf('# 이슈 내용'), p.indexOf('# 이슈 내용') + 600)}`);
+  assert.ok(p.indexOf('===== #5 본문') < p.indexOf('# 작업 모드 절차'), '이슈 내용은 절차 앞에 온다');
+});
+
 // ---------- 하달 기록 ----------
 async function dispatchOnly(f, repo, argv) {
   const out = []; const launched = [];

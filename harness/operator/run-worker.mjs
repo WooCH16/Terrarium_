@@ -557,7 +557,8 @@ export async function main(argv, env = process.env, deps = {}) {
     let targetChanged = false;
     let breach = null;
     // 러너를 띄우기 직전에 start 한 줄. base·baseCommit은 반영 순서 검사(결정 8-31)가 쓴다.
-    logWorker(run, handoff, { event: 'start', issue, requestedModel: requested, model: P.model, base, baseCommit }, now);
+    // mainBefore·replacedReason은 결과 보고서 초안(result-draft)이 사실 칸을 채울 때 읽는다(결정 8-42).
+    logWorker(run, handoff, { event: 'start', issue, requestedModel: requested, model: P.model, base, baseCommit, mainBefore, ...(P.chosen.replacedFrom ? { replacedFrom: P.chosen.replacedFrom, replacedReason: P.chosen.reason } : {}) }, now);
     logEnd = (extra) => logWorker(run, handoff, { event: 'end', issue, attempts, model: P.model, ...extra }, now);
     let asked = null; // 워커가 물었으면 { text }. 질문은 실패가 아니다: 시도를 더 쓰지 않고 멈춘다.
     while (attempts < attemptsMax && !ok && breach === null && asked === null) {
@@ -655,7 +656,7 @@ export async function main(argv, env = process.env, deps = {}) {
         // 질문 기록은 handoffs/ 아래(오퍼레이터·코디네이터가 쓰지 못하는 곳)에 둔다. 질문 본문은 출력하지 않고 경로만 낸다.
         writeFileSync(recordFile, JSON.stringify({ issue, requestedModel: requested, base, baseCommit, rounds: round, question: asked.text.slice(0, MAX_QUESTION_BYTES), decisions, at: now().toISOString() }, null, 2));
         write(JSON.stringify(result({ status: '결정필요', attempts, failures, question: `worktrees/${handoff}/issue-${issue}/${QUESTION_REL}`, round, mainBefore, mainAfter, commit: null, actualModel: observed.model })));
-        logEnd({ status: '결정필요', actualModel: observed.model });
+        logEnd({ status: '결정필요', actualModel: observed.model, mainAfter });
         logEnd = null;
         return QUESTION_EXIT;
       }
@@ -665,7 +666,7 @@ export async function main(argv, env = process.env, deps = {}) {
     let commit = null;
     if (ok) { try { commit = git(memo, ['rev-parse', '--verify', `refs/heads/${names.issueBranch}`]).trim(); } catch { /* 기록하지 못한 값은 null */ } }
     write(JSON.stringify(result({ status: ok ? '완료' : '막힘', attempts, failures, mainBefore, mainAfter, commit, actualModel: observed.model, modelTrace: observed.trace, ...(breach ? { outsideChanges: breach } : {}), ...(targetChanged ? { targetProjectChanged: true } : {}) })));
-    logEnd({ status: ok ? '완료' : '막힘', actualModel: observed.model });
+    logEnd({ status: ok ? '완료' : '막힘', actualModel: observed.model, mainAfter });
     logEnd = null;
     return ok ? 0 : 1;
   } catch (e) {
