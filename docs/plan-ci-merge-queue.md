@@ -1,6 +1,6 @@
 # 계획: 머지 큐·머지 트레인과 바뀐 부분만 검사
 
-**상태: 제안, 미승인.** 승인 전에는 CI 설정(`.github/workflows/ci.yml`)을 고치지 않는다.
+**상태: 승인(2026-11-26, 결정 8-45).** CI 설정(`.github/workflows/ci.yml`) 변경도 승인받았다.
 
 ## 요구 (소유자 말 그대로)
 
@@ -58,8 +58,10 @@ GitHub의 머지 큐 기능은 쓰지 않는다.
 |---|---|
 | 항상 | `scripts/check.js` |
 | `harness/test/<이름>.test.mjs` | 그 파일 |
-| `harness/` 아래 모듈 하나 | 그 모듈 이름을 불러 쓰거나 언급하는 시험 파일 |
-| 문서(`docs/`, `harness/**/*.md`) | 문서를 읽어 확인하는 시험(수치 대조, 절차 문구, 워커 지침 낱말 등). 문서만 바뀌어도 건너뛰지 않는다 |
+| `harness/` 아래 모듈 하나 | 그 모듈을 직접·간접으로 불러 쓰거나 띄우는 시험 파일. 닿는 시험이 없으면 전체 |
+| `docs/` 문서 | `docs/`를 읽는 시험 |
+| 역할 문서(`harness/**/*.md`) | 역할 문서를 읽는 시험 전부와, 실행 중에 그 문서를 읽는 모듈에 닿는 시험 |
+| 저장소 루트의 `*.md`, `.claude/` 문서 | `check`만(읽는 시험이 없다) |
 | `app/` | 앱 논리 시험 |
 | 공용 모듈(`protocol.mjs`, `report.mjs`, `policy.mjs`), 설정 JSON, 시험 도우미, `scripts/`, `.github/` | 전체 |
 | 위에 없는 경로 | 전체 |
@@ -76,6 +78,22 @@ GitHub의 머지 큐 기능은 쓰지 않는다.
 |---|---|
 | GitHub Actions (PR #48) | `check` 7초, `harness-unit` 1분 14초 |
 | 이 PC (Windows) | 빠른 시험 약 3분, 느린 시험 약 9분 |
+
+만든 규칙으로 고르는 시험 파일 수(전체 48개, 그중 느린 9개). 시간은 재지 않았다.
+
+| 바뀐 파일 | 고르는 시험 | 느린 시험 |
+|---|---|---|
+| `CHANGELOG.md`, `app/` 화면 | 0 (앱은 앱 논리 시험) | 0 |
+| `docs/operator.md` | 7 | 0 |
+| `result-draft.mjs` | 2 | 0 |
+| `setup.mjs` | 6 | 1 |
+| `jev-review.mjs` | 9 | 1 |
+| `run-worker.mjs`, `run-operator.mjs`, `merge-adapter.mjs` | 19 | 7 |
+| `launch.mjs` | 27 | 8 |
+| `worker/AGENT.md` | 30 | 8 |
+| 공용 모듈, 설정 | 전체 | 9 |
+
+여러 모듈이 `run-operator.mjs`의 도우미를 불러 쓰기 때문에, 중심 모듈을 바꾸면 느린 시험 대부분이 남는다. 도우미를 따로 떼면 줄지만 이 계획에 넣지 않았다.
 
 Actions에서 줄어드는 시간은 PR 하나에 1분 남짓이 최대다. 효과가 큰 곳은 작업 중에 이 PC에서 돌리는 시험이다. 같은 대응 규칙을 로컬에서도 쓴다(`node scripts/test.mjs --changed <기준>`).
 
