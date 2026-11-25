@@ -53,6 +53,18 @@ test('결정 8-39: Pi 워커는 ask_operator로 묻고 기다리며, 오퍼레�
   assert.match(w, /8이 오면 다음 대기 번호로/);
 });
 
+test('결정 8-41: 작업 절차는 명령 규칙을 맨 앞에 두고, 이슈는 지침의 이슈 내용으로 읽으며 harness.json을 열지 않는다', () => {
+  const w = read('operator/skills/operator-work/SKILL.md');
+  const rules = w.indexOf('## 0. 명령 규칙');
+  assert.ok(rules > 0 && rules < w.indexOf('## 1. 이슈 읽기'), '명령 규칙이 1절 앞에 있다');
+  assert.match(w, /`&&`/);
+  assert.match(w, /`cd`/);
+  assert.match(w, /시험을 직접 돌리지 않는다/);
+  assert.match(w, /`# 이슈 내용`/);
+  assert.match(w, /`- 하네스 폴더:`/);
+  assert.doesNotMatch(w, /`harness\.json`에서 `harnessDir`을 읽고/);
+});
+
 test('work.md: worker and enqueue steps, and no direct merge into main', () => {
   const w = read('operator/skills/operator-work/SKILL.md');
   assert.match(w, /run-worker/);
