@@ -266,23 +266,23 @@ const withOperatorModel = async (value, fn) => {
   try { return await fn(); } finally { if (prev === undefined) delete process.env.HARNESS_OPERATOR_MODEL; else process.env.HARNESS_OPERATOR_MODEL = prev; }
 };
 
-test('launchSession: 작업 모드 오퍼레이터는 기본으로 haiku로 뜬다(속도)', async () => {
+test('launchSession: 작업 모드 오퍼레이터는 기본으로 sonnet으로 뜬다(결정 8-43)', async () => {
   const ctx = makeRun();
   mkdirSync(`${ctx.run}/handoffs/h1`, { recursive: true });
   const fake = fakeEnv();
   await withOperatorModel(undefined, () => launchSession({ mode: 'work', handoff: 'h1', run: ctx.run, harnessDir: ctx.harnessDir, issues: [7], prompt: 'p', timeoutMs: 20000 }));
-  assert.equal(modelArg(fake.calls()[0].args), 'haiku');
+  assert.equal(modelArg(fake.calls()[0].args), 'sonnet');
 });
 
 test('launchSession: HARNESS_OPERATOR_MODEL로 작업 모드 모델을 바꾸고, 이상한 값은 기본값으로 둔다', async () => {
   const ctx = makeRun();
   mkdirSync(`${ctx.run}/handoffs/h1`, { recursive: true });
   let fake = fakeEnv();
-  await withOperatorModel('sonnet', () => launchSession({ mode: 'work', handoff: 'h1', run: ctx.run, harnessDir: ctx.harnessDir, prompt: 'p', timeoutMs: 20000 }));
-  assert.equal(modelArg(fake.calls()[0].args), 'sonnet');
+  await withOperatorModel('haiku', () => launchSession({ mode: 'work', handoff: 'h1', run: ctx.run, harnessDir: ctx.harnessDir, prompt: 'p', timeoutMs: 20000 }));
+  assert.equal(modelArg(fake.calls()[0].args), 'haiku');
   fake = fakeEnv();
   await withOperatorModel('x; rm -rf', () => launchSession({ mode: 'work', handoff: 'h1', run: ctx.run, harnessDir: ctx.harnessDir, prompt: 'p', timeoutMs: 20000 }));
-  assert.equal(modelArg(fake.calls()[0].args), 'haiku');
+  assert.equal(modelArg(fake.calls()[0].args), 'sonnet');
 });
 
 test('launchSession: research 모드는 모델을 정하지 않는다(사용자 기본 모델)', async () => {
