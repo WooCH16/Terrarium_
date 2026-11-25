@@ -153,3 +153,15 @@ test('8-44 loop 양식: 코디네이터 스킬이 간격·끝나는 조건·결�
   assert.match(readFileSync(`${realHarness}/coordinator/AGENT.md`, 'utf8'), /`coordinator-issue-loop` 스킬/);
   assert.match(readFileSync(`${realHarness}/reviewer/AGENT.md`, 'utf8'), /^### scope$/m);
 });
+test('8-44 기준을 바꾸는 결정: loop는 본문의 완료 기준 표를 고친 뒤 옮기고, 끊긴 차례는 다시 큐에 넣으며, 워커 규칙이 사용자 결정을 따른다', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { decide } = await import('../policy.mjs');
+  const skill = readFileSync(`${realHarness}/coordinator/skills/coordinator-issue-loop/SKILL.md`, 'utf8');
+  assert.match(skill, /결정이 완료 기준을 바꾸면[^\n]*본문의 `## 완료 기준` 표/);
+  assert.match(skill, /gh issue edit <번호> --repo \{\{REPO\}\} --body-file/);
+  assert.match(skill, /`결정대기`인데 `## 사용자 결정` 댓글이 이미 있는 이슈/);
+  assert.match(readFileSync(`${realHarness}/worker/AGENT.md`, 'utf8'), /`## 소유자 결정`[^\n]*본문과 어긋나면 그 결정을 따른다/);
+  const config = { harnessDir: 'C:/h', runDir: 'C:/run', issuesClone: 'C:/run/issues', targetProject: 'C:/run/memo', designatedRepo: 'o/r' };
+  const r = decide({ tool_name: 'Bash', tool_input: { command: 'gh issue edit 7 --repo o/r --body-file C:/run/issues/.drafts/7.md' }, cwd: 'C:/run' }, config, { visibility: () => 'PRIVATE', readFile: () => '## 목표\nx' });
+  assert.equal(r.allow, true, r.reason);
+});

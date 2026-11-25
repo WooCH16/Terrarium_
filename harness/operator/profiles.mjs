@@ -3,7 +3,7 @@
 // 허용 목록 방식: "이 하달의 것"만 통과시키고, 나머지는 모두 거부한다.
 import { handoffNames } from './handoff.mjs';
 import { STATES } from './report.mjs';
-import { VERDICT_HEAD } from './protocol.mjs';
+import { VERDICT_HEAD, OWNER_DECISION_HEAD, DECISION_LINKS_HEAD } from './protocol.mjs';
 
 const allow = () => ({ allow: true, reason: '허용' });
 const deny = (reason) => ({ allow: false, reason });
@@ -110,6 +110,8 @@ function ghIssue(tokens, config, deps, h, cwd) {
       try { text = deps.readFile ? deps.readFile(f) : null; } catch { /* 읽을 수 없으면 policy의 본문 파일 검사가 거부한다 */ }
       const lead = text === null ? '' : String(text).split(/\r?\n/).map((l) => l.replace(/\p{Cf}/gu, '').normalize('NFKC')).find((l) => l.trim() !== '') ?? '';
       if (/^\s*#{1,6}\s*리뷰어\s*판정/.test(lead)) return deny(`리뷰어 판정 댓글(\`${VERDICT_HEAD}\`)은 오퍼레이터가 올릴 수 없다. 판정은 리뷰어의 일이다`);
+      // 워커와 시작 스크립트가 믿는 댓글(결정 8-44): 사용자 결정과 결정 이슈 목록은 이 세션이 만들지 않는다.
+      if (/^\s*#{1,6}\s*(사용자\s*결정|결정\s*이슈)/.test(lead)) return deny(`\`${OWNER_DECISION_HEAD}\`·\`${DECISION_LINKS_HEAD}\` 댓글은 오퍼레이터가 올릴 수 없다`);
     }
   }
   if (sub === 'comment' || sub === 'edit') {
