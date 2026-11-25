@@ -62,7 +62,7 @@ export function runPreflight(opts = {}, deps = {}) {
       detail = vis ?? (firstLine(v.stderr) || '확인하지 못함');
     }
     // 결정 8-28: 저장소가 없을 때만 setup --create-repo가 만들어 준다. 공개 저장소는 고쳐 주지 않는다.
-    add({ id: 'repo', label: `지정 저장소 ${opts.repo} 비공개`, ok, detail, fix: `비공개 저장소를 지정하세요. 저장소가 없으면 gh repo create ${opts.repo} --private로 만들거나, setup.mjs에 --create-repo를 붙이면 비공개로 만들어 줍니다. 이미 공개인 저장소는 만들어 주지 않으니 다른 비공개 저장소를 지정하세요` });
+    add({ id: 'repo', label: `지정 저장소 ${opts.repo} 비공개`, ok, detail, fix: `비공개 저장소를 지정하세요. 저장소가 없으면 setup.mjs를 --repo 없이 돌리면 알아서 만들고, 이 이름을 쓰려면 --create-repo를 붙이거나 gh repo create ${opts.repo} --private로 만듭니다. 이미 공개인 저장소는 만들어 주지 않으니 다른 비공개 저장소를 지정하세요` });
   }
 
   // 결정 8-32: 대상 저장소(코드)의 GitHub Actions 흐름. 실패가 아니라 경고다(없으면 로컬 흐름으로 돈다). required: false.

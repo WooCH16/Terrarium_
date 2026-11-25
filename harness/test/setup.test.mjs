@@ -145,6 +145,11 @@ const a = process.argv.slice(2);
 appendFileSync(process.env.FAKE_LOG, a.join(' ') + '\\n');
 if (a[0] === 'api' && a[1] === 'user') { process.stdout.write((process.env.FAKE_LOGIN ?? 'tester') + '\\n'); process.exit(0); }
 if (a[0] === 'repo' && a[1] === 'create') { writeFileSync(process.env.FAKE_CREATED, a[2]); process.exit(0); }
+if (a[0] === 'repo' && a[1] === 'view' && a[4] === 'visibility,description') {
+  const found = JSON.parse(process.env.FAKE_REPOS ?? '{}')[a[2]];
+  if (!found) { process.stderr.write("GraphQL: Could not resolve to a Repository with the name '" + a[2] + "'. (repository)\\n"); process.exit(1); }
+  process.stdout.write(JSON.stringify(found) + '\\n'); process.exit(0);
+}
 if (a[0] === 'repo' && a[1] === 'view' && process.env.FAKE_MISSING && !existsSync(process.env.FAKE_CREATED)) { process.stderr.write("GraphQL: Could not resolve to a Repository with the name '" + a[2] + "'. (repository)\\n"); process.exit(1); }
 if (a[0] === 'repo' && a[1] === 'view') { process.stdout.write((process.env.FAKE_VIS ?? 'PRIVATE') + '\\n'); process.exit(process.env.FAKE_VIEW_FAIL ? 1 : 0); }
 if (a[0] === 'repo' && a[1] === 'clone') { execFileSync('git', ['clone', '-q', process.env.FAKE_ORIGIN, a[3]], { stdio: 'ignore' }); process.exit(0); }
@@ -285,15 +290,14 @@ test('T3: 비어 있지 않은 실행 폴더에는 설치하지 않는다(종료
 const setupGh = (run, args, env) => spawnSync(process.execPath, [join(harnessDir, 'setup.mjs'), '--run', run, ...args], { encoding: 'utf8', env });
 const calls = (g) => readFileSync(g.log, 'utf8').split('\n').filter(Boolean);
 
-test('8-28 (a): --repo 없이 --create-repo면 로그인 계정으로 <login>/harness-issues를 쓴다', () => {
+test('8-28 (a)·8-46: --repo 없이 --create-repo면 로그인 계정과 프로젝트 이름으로 저장소 이름을 짓는다', () => {
   const g = fakeGh();
   const run = freshRun();
   const r = setupGh(run, ['--create-repo'], { ...g.env, FAKE_LOGIN: 'tester' });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(JSON.parse(readFileSync(join(run, 'harness.json'), 'utf8')).designatedRepo, 'tester/harness-issues');
+  assert.equal(JSON.parse(readFileSync(join(run, 'harness.json'), 'utf8')).designatedRepo, 'tester/harness-issues-memo');
   assert.equal(calls(g)[0], 'api user --jq .login');
-  assert.equal(calls(g)[1], 'repo view tester/harness-issues --json visibility -q .visibility');
-  assert.ok(!calls(g).some((c) => c.startsWith('repo create')), '이미 있으면 만들지 않는다');
+  assert.equal(calls(g)[1], 'repo view tester/harness-issues-memo --json visibility,description');
   // 기본 이름도 setup의 owner/name 형식 검사를 받는다: 로그인 값이 이상하면 아무것도 쓰지 않는다
   const g2 = fakeGh();
   const parent = mkdtempSync(join(tmpdir(), 'setup-'));
@@ -436,4 +440,52 @@ test('#19: --refresh는 지정했던 대상 프로젝트 이름을 유지하고 
   assert.ok(readFileSync(join(run, 'CLAUDE.md'), 'utf8').includes('records/shop-api.md'));
   assert.equal(JSON.parse(readFileSync(join(run, 'harness.json'), 'utf8')).projectName, 'shop-api');
   assert.equal(setupProject(run, src, ['--refresh']).status, 1);
+});
+
+// ---------- 결정 8-46: --repo가 없으면 알아서 만들고, 두 번째 프로젝트도 이름을 알아서 짓는다 ----------
+const auto = (extra = [], env = {}, g = fakeGh()) => {
+  const run = freshRun();
+  const r = setupGh(run, extra, { ...g.env, FAKE_LOGIN: 'tester', ...env });
+  const config = existsSync(join(run, 'harness.json')) ? JSON.parse(readFileSync(join(run, 'harness.json'), 'utf8')) : null;
+  return { r, g, run, config, made: calls(g).filter((c) => c.startsWith('repo create ')) };
+};
+const markerOf = (made) => /--description (terrarium-harness:[0-9a-f]{16})$/.exec(made[0])?.[1];
+
+test('8-46: --repo 없이 설치하면 깃발 없이도 비공개 저장소를 만들고 이름을 알린다. 설명에는 폴더 경로가 아니라 해시만 적는다', () => {
+  const a = auto();
+  assert.equal(a.r.status, 0, a.r.stderr);
+  assert.equal(a.config.designatedRepo, 'tester/harness-issues-memo');
+  assert.match(a.made[0], /^repo create tester\/harness-issues-memo --private --description terrarium-harness:[0-9a-f]{16}$/);
+  assert.match(a.r.stdout, /비공개로 만들었다: tester\/harness-issues-memo/);
+});
+
+test('8-46: 두 번째 프로젝트는 폴더 이름으로, 같은 이름의 다른 저장소가 있으면 -2를 붙이고, 같은 폴더를 다시 설치하면 그 저장소를 다시 쓴다', () => {
+  const shop = makeProject('shop');
+  const first = auto(['--project', shop]);
+  assert.equal(first.config?.designatedRepo, 'tester/harness-issues-shop', first.r.stderr);
+  const marker = markerOf(first.made);
+  const other = auto(['--project', shop], { FAKE_REPOS: JSON.stringify({ 'tester/harness-issues-shop': { visibility: 'PRIVATE', description: 'terrarium-harness:0000000000000000' } }) });
+  assert.equal(other.config?.designatedRepo, 'tester/harness-issues-shop-2', other.r.stderr);
+  const again = auto(['--project', shop], { FAKE_REPOS: JSON.stringify({ 'tester/harness-issues-shop': { visibility: 'PRIVATE', description: marker } }) });
+  assert.equal(again.config?.designatedRepo, 'tester/harness-issues-shop', again.r.stderr);
+  assert.deepEqual(again.made, []);
+  assert.match(again.r.stdout, /있는 저장소를 씁니다: tester\/harness-issues-shop/);
+});
+
+test('8-46: 지은 이름의 저장소가 공개면 만들지도 쓰지도 않고 멈춘다. --no-clone은 --repo가 필요하다', () => {
+  const a = auto([], { FAKE_REPOS: JSON.stringify({ 'tester/harness-issues-memo': { visibility: 'PUBLIC', description: '' } }) });
+  assert.equal(a.r.status, 2, a.r.stderr);
+  assert.match(a.r.stderr, /PRIVATE가 아니다/);
+  assert.deepEqual(a.made, []);
+  assert.equal(a.config, null);
+  const n = auto(['--no-clone']);
+  assert.equal(n.r.status, 1);
+  assert.deepEqual(calls(n.g), []);
+});
+
+test('8-46: --refresh는 --repo가 없으면 실행 폴더의 지정 저장소를 그대로 쓴다', () => {
+  const run = runSetup();
+  const r = setupRaw(['--run', run, '--refresh']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(readFileSync(join(run, 'harness.json'), 'utf8')).designatedRepo, REPO);
 });
