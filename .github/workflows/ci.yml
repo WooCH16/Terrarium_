@@ -31,6 +31,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 바뀐 파일을 기준 브랜치와 비교한다
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -40,7 +42,15 @@ jobs:
           node --version
           git --version
       # 빠른 시험과 오래 걸리는 통합 시험을 나눠 돌린다(이슈 #27). 실행 스크립트가 진짜 모델 CLI 대신 덫을 기본값으로 둔다.
+      # main이 아닌 브랜치(beta)로 가는 PR은 바뀐 부분에 닿는 시험만 돌린다. main PR과 main push는 전체(docs/plan-ci-merge-queue.md).
+      - name: Harness changed tests
+        if: github.event_name == 'pull_request' && github.base_ref != 'main'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: node scripts/test.mjs --changed "origin/$BASE_REF"
       - name: Harness fast tests
+        if: github.event_name != 'pull_request' || github.base_ref == 'main'
         run: node scripts/test.mjs --fast
       - name: Harness slow tests
+        if: github.event_name != 'pull_request' || github.base_ref == 'main'
         run: node scripts/test.mjs --slow
