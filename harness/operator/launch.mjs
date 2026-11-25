@@ -124,6 +124,14 @@ export function killTree(pid) {
   execFileSync(win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe'), ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore', timeout: 5000 });
 }
 
+// 작업 모드 오퍼레이터의 모델. 시간 대부분이 모델 왕복이라 기본은 빠른 haiku다(결정 8-40).
+// HARNESS_OPERATOR_MODEL로 바꾼다(모델 이름 모양이 아니면 무시). research 모드는 사용자 기본 모델 그대로다.
+export const DEFAULT_OPERATOR_MODEL = 'haiku';
+export function operatorModel(env = process.env) {
+  const v = env.HARNESS_OPERATOR_MODEL;
+  return typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:\[\]-]*$/.test(v) ? v : DEFAULT_OPERATOR_MODEL;
+}
+
 export function launchSession(opts, deps = {}) {
   const { mode, handoff, run, harnessDir, issue, issues, prompt, timeoutMs, baseHandoff } = opts;
   const spawn = deps.spawn ?? nodeSpawn;
@@ -144,6 +152,7 @@ export function launchSession(opts, deps = {}) {
     ...(script ? [configured] : (found?.args ?? [])),
     '-p', '--settings', settingsFile, '--setting-sources', 'user',
     '--allowedTools', TOOLS[mode], '--no-session-persistence',
+    ...(mode === 'work' ? ['--model', operatorModel()] : []),
   ];
 
   return new Promise((resolve) => {
