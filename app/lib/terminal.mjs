@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 
 // README "실행" 절과 같은 설정. 대화형이라 -p는 쓰지 않는다.
-export const TOOLS = 'Bash Write Edit Read Glob Grep Agent TodoWrite Skill';
+export const TOOLS = 'Bash Write Edit Read Glob Grep Agent TodoWrite Skill CronCreate CronList CronDelete';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // 앱을 Claude Code 안에서 띄우면 그 세션의 표지 변수가 따라온다. 그대로 넘기면 코디네이터가 자식 세션으로 여겨

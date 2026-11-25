@@ -19,7 +19,7 @@ test('기본 파일을 읽는다', () => {
   const c = loadOperatorConfig(defaultFile);
   assert.deepEqual(c.allowedModels, ['claude', 'gemini', 'muse']);
   assert.equal(c.workerRetries, 2);
-  assert.equal(c.rejectLimit, 2);
+  assert.equal(c.rejectLimit, 5); // 결정 8-44: 스스로 고치는 재작업은 5번까지
   assert.equal(c.noReportRetries, 2); // 소유자 결정 2-4·8-4: 결과 없음은 2회 다시 시킨다
   assert.equal(c.sessionRestarts, 1);
   assert.equal(c.ci.mergeQueue, 'local');

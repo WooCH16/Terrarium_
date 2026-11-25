@@ -3,8 +3,16 @@
 // 사람에게 보이는 안내 문장은 여기 두지 않는다. harness/test/protocol.test.mjs가 이 파일 밖의 하드코딩을 찾는다.
 
 // 상태 라벨(이슈 #2 결정 1)과 상태가 아닌 라벨
-export const STATES = Object.freeze(['진행중', '리뷰대기', '허용됨', '미완료', '막힘', '거부목록', '보류', '반영됨', '대기']);
+export const STATES = Object.freeze(['진행중', '리뷰대기', '허용됨', '미완료', '막힘', '거부목록', '보류', '반영됨', '대기', '결정대기']);
 export const CANCEL_LABEL = '취소';
+// 결정 8-44: 사용자 결정을 묻는 이슈(상태 라벨이 아니다). 시작 스크립트가 만들고, 이 라벨이 붙은 이슈에는 워커를 보내지 않는다.
+export const DECISION_LABEL = '결정필요';
+// 거부 이유의 표시(리뷰어가 붙인다), 원래 이슈에 남기는 결정 이슈 목록 댓글, 사용자 결정을 옮긴 댓글, 결정 이슈 본문의 원래 이슈 줄
+export const FIX_SELF = '[스스로 고침]';
+export const FIX_OWNER = '[사용자 결정]';
+export const DECISION_LINKS_HEAD = '## 결정 이슈';
+export const OWNER_DECISION_HEAD = '## 사용자 결정';
+export const ORIGIN_ISSUE = '원래 이슈';
 export const NO_LABEL = '라벨 없음';
 
 // 오퍼레이터의 결과 보고서 댓글
@@ -45,4 +53,4 @@ export const fieldLine = (name) => new RegExp(`^[ \\t]*(?:[-*][ \\t]+)?${esc(nam
 // `허용된 커밋: <40자리>` 줄
 export const ALLOWED_COMMIT_LINE = new RegExp(`^${esc(ALLOWED_COMMIT)}: ([0-9a-f]{40})[ \\t]*$`);
 // 라벨을 이름으로 쓴다: LABEL.막힘 처럼. 스크립트는 라벨 글자를 직접 쓰지 않는다.
-export const LABEL = Object.freeze(Object.fromEntries([...STATES, CANCEL_LABEL].map((s) => [s, s])));
+export const LABEL = Object.freeze(Object.fromEntries([...STATES, CANCEL_LABEL, DECISION_LABEL].map((s) => [s, s])));

@@ -13,13 +13,17 @@
 // 질문 문구의 기준은 harness/reviewer/AGENT.md의 `## Jev 질문` 절 하나다(리뷰어 규칙 문서). 이 모듈은 그 절을 읽어 질문을 만든다.
 import { readFileSync } from 'node:fs';
 import { readNoul } from './jev.mjs';
-import { REPORT_HEAD, REPORT_SECTIONS, REPORT_TABLE } from './protocol.mjs';
+import { REPORT_HEAD, REPORT_SECTIONS, REPORT_TABLE, FIX_SELF, FIX_OWNER } from './protocol.mjs';
 
 export { REPORT_SECTIONS };
 export const UNIT_SECTIONS = ['목표', '완료 기준', '먼저 끝나야 할 것', '전제·위험'];
 
 export const REVIEWER_DOC = new URL('../reviewer/AGENT.md', import.meta.url);
-export const QUESTION_NAMES = ['met', 'evidence', 'decidable', 'checkable'];
+export const QUESTION_NAMES = ['met', 'evidence', 'scope', 'decidable', 'checkable'];
+// 거부 이유의 표시(결정 8-44). scope 질문이 아니오인 기준만 사용자 결정이다. 코드 검사의 거부는 늘 스스로 고침이다.
+export { FIX_SELF, FIX_OWNER };
+// scope 질문은 허용·거부를 바꾸지 않는다. 거부 이유의 표시에만 쓴다.
+const TAG_ONLY = /^scope_/;
 
 // `## Jev 질문` 절의 `### <이름>`마다 `- 묻는 말:`, `- 예:`, `- 아니오:` 줄을 읽는다.
 // 하나라도 없으면 오류다(빈 질문으로 판정하지 않는다).
@@ -138,6 +142,7 @@ export function reportQuestions(criteria) {
   criteria.forEach((c, i) => {
     q[`met_${i + 1}`] = question('met', { 기준: c });
     q[`evidence_${i + 1}`] = question('evidence', { 기준: c });
+    q[`scope_${i + 1}`] = question('scope', { 기준: c });
   });
   return q;
 }
@@ -178,8 +183,8 @@ export function proposalQuestions(units) {
 
 // 질문 이름 → 사람이 읽는 설명(거부 이유에 쓴다).
 export function describeQuestion(name, { criteria, units }) {
-  let m = /^(met|evidence)_(\d+)$/.exec(name);
-  if (m && criteria) return `${m[1] === 'met' ? '충족으로 적혔는가' : '근거 위치가 구체적인가'} — 기준 ${m[2]}: ${criteria[Number(m[2]) - 1]}`;
+  let m = /^(met|evidence|scope)_(\d+)$/.exec(name);
+  if (m && criteria) return `${{ met: '충족으로 적혔는가', evidence: '근거 위치가 구체적인가', scope: '이슈 범위 안에서 고칠 수 있는가' }[m[1]]} — 기준 ${m[2]}: ${criteria[Number(m[2]) - 1]}`;
   m = /^(decidable|checkable)_(\d+)_(\d+)$/.exec(name);
   if (m && units) {
     const u = units[Number(m[2]) - 1];
@@ -193,11 +198,19 @@ export function describeQuestion(name, { criteria, units }) {
 export function decide(answers, questions, jev, ctx = {}) {
   const lines = [];
   const rows = [];
+  const reads = {};
   for (const name of Object.keys(questions)) {
     const p = answers[name].noul;
     const r = readNoul(p, jev);
+    reads[name] = r;
     rows.push({ name, p, read: r });
-    if (r !== '예') lines.push(`- ${r === '애매' ? '판단이 서지 않음' : '아니오'} (${p.toFixed(2)}): ${describeQuestion(name, ctx)}`);
+  }
+  for (const { name, p, read: r } of rows) {
+    if (r === '예' || TAG_ONLY.test(name)) continue;
+    const i = /_(\d+)$/.exec(name)?.[1];
+    // 표시는 결과 보고서 판정에만 붙인다(조언 판정의 이유는 어드바이저가 읽는다).
+    const tag = ctx.criteria === undefined ? '' : `${/^(met|evidence)_/.test(name) && reads[`scope_${i}`] === '아니오' ? FIX_OWNER : FIX_SELF} `;
+    lines.push(`- ${tag}${r === '애매' ? '판단이 서지 않음' : '아니오'} (${p.toFixed(2)}): ${describeQuestion(name, ctx)}`);
   }
   return { verdict: lines.length === 0 ? '허용' : '거부', reasons: lines, rows };
 }

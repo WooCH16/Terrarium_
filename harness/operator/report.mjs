@@ -1,16 +1,16 @@
-import { STATES, CANCEL_LABEL, NO_LABEL, LABEL } from './protocol.mjs';
+import { STATES, CANCEL_LABEL, DECISION_LABEL, NO_LABEL, LABEL } from './protocol.mjs';
 // 대기: 의존하는 이슈가 허용됐지만 아직 main에 반영되지 않아 이번 하달에서 뺀 이슈(소유자 결정, 새 하달의 시작점). 반영 뒤 다시 하달한다.
 export { STATES };
 
 // 상태가 아닌 라벨: 코디네이터가 이슈를 취소할 때 상태 라벨과 함께 붙이고 닫는다(소유자 결정 6). 시작 스크립트가 상태 라벨과 같이 미리 만든다.
 export { CANCEL_LABEL };
 // 시작 스크립트(setup·run-operator·run-research)가 미리 만들어 두는 라벨 전부.
-export const ENSURED_LABELS = Object.freeze([...STATES, CANCEL_LABEL]);
+export const ENSURED_LABELS = Object.freeze([...STATES, CANCEL_LABEL, DECISION_LABEL]);
 
 // 상태 라벨이 하나도 없는 이슈(예: 조사 이슈)를 보고할 때 쓰는 고정 문구. 상태 라벨은 아니다.
 export { NO_LABEL };
 
-const BLOCKING = new Set([LABEL.막힘, LABEL.보류, LABEL.거부목록, LABEL.대기]);
+const BLOCKING = new Set([LABEL.막힘, LABEL.보류, LABEL.거부목록, LABEL.대기, LABEL.결정대기]);
 
 // 오류 메시지에 넣을 값: 줄바꿈이 이스케이프되고 40자로 잘린 문자열. 어떤 값이어도 던지지 않는다.
 function show(value) {

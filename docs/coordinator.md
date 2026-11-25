@@ -24,7 +24,7 @@
 
 ## 3. 실행
 
-- **명령:** `claude --setting-sources project,local --allowedTools "Bash Write Edit Read Glob Grep Agent TodoWrite Skill"`. 앱은 여기에 `--session-id`(처음)나 `--resume`(다음부터)을 붙인다(ADR 0011).
+- **명령:** `claude --setting-sources project,local --allowedTools "Bash Write Edit Read Glob Grep Agent TodoWrite Skill CronCreate CronList CronDelete"`. 앱은 여기에 `--session-id`(처음)나 `--resume`(다음부터)을 붙인다(ADR 0011).
 - **설치:** `setup.mjs`가 실행 문서의 `{{REPO}}`, `{{ISSUES}}`, `{{MEMO}}`, `{{HARNESS}}`, `{{PROJECT}}`, `{{RUN}}`을 채워 실행 폴더의 `CLAUDE.md`로 쓴다. 어드바이저 정의, 훅 설정(`.claude/settings.json`), `harness.json`도 함께 만든다.
 - **어디서:** 터미널에서 직접 띄우거나(Claude CLI 버전), 데스크톱 앱의 관제탑 ORCHESTRA 칸에서 띄운다(앱 버전). 둘은 같은 세션이다.
 

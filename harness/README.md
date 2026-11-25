@@ -46,7 +46,7 @@ node harness/setup.mjs --run C:/Users/<you>/terrarium-run --create-repo [--repo 
 
 ```bash
 cd C:/Users/<you>/terrarium-run
-claude --setting-sources project,local --allowedTools "Bash Write Edit Read Glob Grep Agent TodoWrite Skill"
+claude --setting-sources project,local --allowedTools "Bash Write Edit Read Glob Grep Agent TodoWrite Skill CronCreate CronList CronDelete"
 ```
 
 - `--setting-sources project,local`: 사용자 전역 설정의 플러그인과 훅을 끕니다. 전역 `~/.claude/CLAUDE.md`·`~/.claude/rules/`와 실행 폴더 상위 폴더의 `CLAUDE.md`는 `setup`이 실행 폴더 설정에 넣는 `claudeMdExcludes`가 뺍니다(오퍼레이터·워커 세션도 같음). 조직이 배포한 관리 정책 `CLAUDE.md`는 뺄 수 없습니다.

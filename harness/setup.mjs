@@ -175,7 +175,7 @@ for (const role of ['coordinator', 'advisor']) {
   }
 }
 roleFiles.set('.claude/settings.json', JSON.stringify({
-  permissions: { allow: ['Bash', 'Write', 'Edit', 'Read', 'Glob', 'Grep', 'Agent', 'TodoWrite', 'Skill'] },
+  permissions: { allow: ['Bash', 'Write', 'Edit', 'Read', 'Glob', 'Grep', 'Agent', 'TodoWrite', 'Skill', 'CronCreate', 'CronList', 'CronDelete'] },
   hooks: {
     PreToolUse: [{
       matcher: '*',
@@ -203,7 +203,7 @@ mkdirSync(`${run}/handoffs`, { recursive: true });
 mkdirSync(`${run}/reviewer-inbox`, { recursive: true }); // 리뷰어 전용 폴더(ADR 0006): 어드바이저가 제안문을 쓰고 run-reviewer --advice가 읽는다
 for (const [name, text] of roleFiles) { mkdirSync(dirname(`${run}/${name}`), { recursive: true }); writeFileSync(`${run}/${name}`, text); }
 
-const NEXT = `cd "${run}" && claude --setting-sources project,local --allowedTools "Bash Write Edit Read Glob Grep Agent TodoWrite Skill"`;
+const NEXT = `cd "${run}" && claude --setting-sources project,local --allowedTools "Bash Write Edit Read Glob Grep Agent TodoWrite Skill CronCreate CronList CronDelete"`;
 if (refresh) {
   console.log(`역할 파일 갱신 완료: ${run}`);
   console.log(`다시 쓴 파일: ${[...roleFiles.keys()].join(', ')}`);

@@ -80,7 +80,8 @@ test('#44 요청: 기준마다 met·evidence 두 Noul, 상태는 보고서, 모�
   assert.equal(c.url, 'https://api.typesafe.ai/v1/systemone');
   assert.equal(c.headers.authorization, 'Bearer test-key');
   assert.equal(c.req.model, 'jev-1.14.0');
-  assert.deepEqual(Object.keys(c.req.questions), ['met_1', 'evidence_1', 'met_2', 'evidence_2']);
+  assert.deepEqual(Object.keys(c.req.questions), ['met_1', 'evidence_1', 'scope_1', 'met_2', 'evidence_2', 'scope_2']);
+  assert.match(c.req.questions.scope_2.instructions, /문서가 있다/);
   assert.ok(Object.values(c.req.questions).every((q) => q.type === 'noul' && q.criteria.true && q.criteria.false));
   assert.match(c.req.questions.met_1.instructions, /정렬 옵션이 있다/);
   assert.match(c.req.questions.evidence_2.instructions, /문서가 있다/);
@@ -98,6 +99,24 @@ test('#44 거부: 아니오나 애매(0.3~0.7)가 하나라도 있으면 거부�
     assert.match(text, re);
     assert.ok(!/^허용된 커밋:/m.test(text));
   }
+});
+
+test('결정 8-44: 거부 이유마다 [스스로 고침] 또는 [사용자 결정]을 붙인다. scope는 허용·거부를 바꾸지 않는다', async () => {
+  // 기준 2가 미충족이고, 그 기준은 이슈 범위 안에서 고칠 수 없다(scope_2 아니오) → 사용자 결정. 기준 1의 근거가 애매 → 스스로 고침.
+  let s = setup({ jev: fakeJev({ met_2: 0.1, scope_2: 0.1, evidence_1: 0.5, scope_1: 0.5 }) });
+  await s.run(['--issue', '7']);
+  let text = s.posted[0].text;
+  assert.match(text, /^- \[사용자 결정\] 아니오 \(0\.10\): 충족으로 적혔는가 — 기준 2: 문서가 있다$/m);
+  assert.match(text, /^- \[스스로 고침\] 판단이 서지 않음 \(0\.50\): 근거 위치가 구체적인가 — 기준 1: 정렬 옵션이 있다$/m, 'scope가 애매하면 스스로 고침');
+  assert.ok(!/^- [^[]/m.test(text.split('고칠 점:')[1].split('\n\n')[0]), '모든 이유에 표시가 있다');
+  // scope가 아니오여도 다른 질문이 모두 예면 허용이다.
+  s = setup({ jev: fakeJev({ scope_1: 0.05, scope_2: 0.05 }) });
+  await s.run(['--issue', '7']);
+  assert.equal(s.posted[0].text.split('\n')[0], '## 리뷰어 판정: 허용');
+  // 코드 검사의 거부는 늘 스스로 고침이다.
+  s = setup({ report: reportOf('d'.repeat(40)) });
+  await s.run(['--issue', '7']);
+  assert.match(s.posted[0].text, /^- \[스스로 고침\] /m);
 });
 
 test('#44 코드 검사: 해시 줄·칸·완료 기준 표·근거 파일에 문제가 있으면 Jev를 부르지 않고 거부한다', async () => {

@@ -62,6 +62,12 @@ test('denies tools outside allowlist', () => {
   }
 });
 
+test('결정 8-44: 코디네이터는 이슈 loop를 걸고 끄는 반복 작업 도구(CronCreate·CronList·CronDelete)와 loop 스킬을 쓸 수 있다', () => {
+  for (const t of ['CronCreate', 'CronList', 'CronDelete']) ok(decide(coord(t, { cron: '0 * * * *', prompt: 'x' }), config, deps()), t);
+  ok(decide(coord('Skill', { skill: 'loop', args: '1h coordinator-issue-loop' }), config, deps()));
+  for (const t of ['CronCreate', 'CronDelete']) no(decide({ ...coord(t, { cron: '0 * * * *', prompt: 'x' }), agent_type: 'advisor' }, config, deps()), `advisor ${t}`);
+});
+
 test('allows Skill tool for coordinator', () => {
   ok(decide(coord('Skill', { skill: 'example-skill' }), config, deps()));
 });

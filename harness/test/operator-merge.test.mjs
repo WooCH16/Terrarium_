@@ -1105,7 +1105,7 @@ test('fetchIssueData: 이슈 본문은 gh issue view로, 댓글은 gh api REST(-
   };
   const fetchIssueData = makeFetchIssueData(exec, 'o/r');
   const d = await fetchIssueData(7);
-  assert.deepEqual(calls[0], ['gh', 'issue', 'view', '7', '--repo', 'o/r', '--json', 'number,state,labels,body,url']);
+  assert.deepEqual(calls[0], ['gh', 'issue', 'view', '7', '--repo', 'o/r', '--json', 'number,title,state,labels,body,url']);
   assert.deepEqual(calls[1], ['gh', 'api', 'repos/o/r/issues/7/comments?per_page=100', '--paginate']);
   assert.deepEqual(d.comments.map((c) => c.body), ['y', 'x']); // createdAt이 같으면 id 순
   assert.equal(d.number, 7);

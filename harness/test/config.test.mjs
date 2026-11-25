@@ -20,7 +20,7 @@ const rejects = (obj, re) => assert.throws(() => loadCoordinatorConfig(write(obj
 // docs/01-overview.md 8절의 시작값(측정하지 않은 값). 코디네이터가 쓰는 것만 이 파일에 있다.
 test('8절 수치(코디네이터가 쓰는 값)가 설정 파일 한 곳에 있다', () => {
   const c = loadCoordinatorConfig(DEFAULT_COORDINATOR_CONFIG);
-  assert.equal(c.reworkLimitPerIssue, 2);
+  assert.equal(c.reworkLimitPerIssue, 5); // 결정 8-44
   assert.equal(c.blockedIssuesReportThreshold, 3);
   assert.equal(c.cancelledIssuesCleanupThreshold, 8);
   assert.equal(c.preferenceProposalAtRepeat, 3);

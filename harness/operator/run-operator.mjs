@@ -1,6 +1,7 @@
 // 오퍼레이터 작업 세션 시작: node run-operator.mjs --issues <n,n,...> [--handoff h<N>]
 // stdout에는 보고 줄(#번호 | 상태 | url)만, 설정·인자·gh 오류는 한국어 한 줄 + 종료 코드 2.
-import { readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, renameSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { loadOperatorConfig, ConfigError } from './config.mjs';
@@ -9,13 +10,14 @@ import { formatReport, exitCode, STATES, NO_LABEL, ENSURED_LABELS } from './repo
 import { parseDependsOn, parseTeam, parseKind, TEAM_NAMES } from './issue-body.mjs';
 import { provenIssuesOnMain, makeFetchIssueData } from './merge-adapter.mjs';
 import { loadModeDocs, launchSession, cleanupHandoff, isStopped, handoffHasWork, removeHandoffWorktrees } from './launch.mjs';
-import { REPORT_HEAD, VERDICT_HEAD, LABEL } from './protocol.mjs';
+import { REPORT_HEAD, VERDICT_HEAD, LABEL, DECISION_LABEL } from './protocol.mjs';
+import { decisionPlan, decisionIssueTitle, decisionIssueBody, decisionLinksComment } from './decision.mjs';
 
 const fwd = (p) => String(p).replace(/\\/g, '/').replace(/\/+$/, '');
 const ONE_LINE = (text) => String(text).replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
 const DEFAULT_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 // 새 하달에서 진행중으로 되돌리는 상태: 합치기 스크립트(enqueue)가 건너뛰는 상태와 라벨 없음. 미완료·리뷰대기는 enqueue가 그대로 다시 합친다.
-const REDISPATCH_RESET = new Set([NO_LABEL, LABEL.허용됨, LABEL.보류, LABEL.막힘, LABEL.대기]);
+const REDISPATCH_RESET = new Set([NO_LABEL, LABEL.허용됨, LABEL.보류, LABEL.막힘, LABEL.대기, LABEL.결정대기]);
 
 // 결과 없음 횟수(소유자 결정 2-4): 이슈마다 보고서 없이 끝난 새 하달이 연달아 몇 번인지. 보고서가 늘면 지운다.
 // handoffs/ 아래라 코디네이터 훅이 쓰기를 막는다.
@@ -107,6 +109,15 @@ export function defaultExec(env = process.env) {
   };
 }
 
+function withBodyFile(body, fn) {
+  const dir = mkdtempSync(`${fwd(tmpdir())}/run-operator-`);
+  try {
+    const f = `${dir}/body.md`;
+    writeFileSync(f, body);
+    return fn(f);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
 export function makeGhDeps(repo, exec = defaultExec()) {
   const view = (n, fields = 'labels,comments,url') => JSON.parse(exec('gh', ['issue', 'view', String(n), '--repo', repo, '--json', fields]));
   const stateLabels = (n, data) => {
@@ -114,7 +125,7 @@ export function makeGhDeps(repo, exec = defaultExec()) {
     if (found.length > 1) throw new Error(`이슈 #${n}의 상태 라벨이 둘 이상입니다(${found.length}개).`);
     return found.length === 0 ? [NO_LABEL] : found;
   };
-  const COLORS = { 진행중: '1D76DB', 리뷰대기: 'FBCA04', 허용됨: '0E8A16', 미완료: 'D93F0B', 막힘: 'B60205', 거부목록: '5319E7', 보류: 'C5DEF5', 반영됨: '006B75', 대기: 'BFD4F2', 취소: 'EDEDED' };
+  const COLORS = { 진행중: '1D76DB', 리뷰대기: 'FBCA04', 허용됨: '0E8A16', 미완료: 'D93F0B', 막힘: 'B60205', 거부목록: '5319E7', 보류: 'C5DEF5', 반영됨: '006B75', 대기: 'BFD4F2', 결정대기: 'F9D0C4', 결정필요: 'E99695', 취소: 'EDEDED' };
   return {
     // 상태 라벨 9개와 취소 라벨을 만든다(이미 있으면 --force로 색·설명만 갱신). 훅이 걸린 세션 밖에서, 세션을 띄우기 전에 부른다.
     async ensureLabels() {
@@ -148,6 +159,18 @@ export function makeGhDeps(repo, exec = defaultExec()) {
       const data = view(n);
       const remove = (data.labels ?? []).map((l) => l.name).filter((name) => STATES.includes(name) && name !== state);
       exec('gh', ['issue', 'edit', String(n), '--repo', repo, '--add-label', state, ...remove.flatMap((l) => ['--remove-label', l])]);
+    },
+    // 결정 이슈(결정 8-44): 본문은 파일로 넘긴다. 새 이슈 번호를 돌려준다.
+    async createIssue({ title, body, labels }) {
+      return withBodyFile(body, (f) => {
+        const url = exec('gh', ['issue', 'create', '--repo', repo, '--title', title, '--body-file', f, ...labels.flatMap((l) => ['--label', l])]).trim().split(/\s+/).pop();
+        const n = Number(/\/issues\/([1-9]\d*)$/.exec(url ?? '')?.[1]);
+        if (!Number.isInteger(n)) throw new Error(`gh issue create가 이슈 주소를 돌려주지 않았습니다: ${ONE_LINE(url)}`);
+        return n;
+      });
+    },
+    async comment(n, body) {
+      withBodyFile(body, (f) => exec('gh', ['issue', 'comment', String(n), '--repo', repo, '--body-file', f]));
     },
   };
 }
@@ -270,6 +293,11 @@ export async function main(argv, env = process.env, deps = {}) {
     const blocked = new Set();
     const rejectedOut = new Set(); // 재작업 한도를 넘어 거부목록으로 뺀 이슈
     const held = new Set();
+    const awaiting = new Set(); // 사용자 결정을 기다리는 원래 이슈(결정대기, 결정 8-44)
+    // 이슈 읽기는 하달 준비 동안 한 번만 한다(결정 이슈 확인, 사용자 결정 확인, 지침의 이슈 내용이 같은 자료를 쓴다).
+    const issueData = new Map();
+    const dataOf = async (n) => { if (!issueData.has(n)) issueData.set(n, await gh.fetchIssueData(n)); return issueData.get(n); };
+    const decisionIssues = new Set(); // 결정필요 라벨이 붙은 결정 이슈: 작업으로 하달하지 않는다
     const before = new Map();
     const noReport = fresh ? readNoReport(run) : {};
     const states = new Map();
@@ -286,7 +314,7 @@ export async function main(argv, env = process.env, deps = {}) {
           if (proven === null) proven = onMain();
           let waits = !proven.has(d);
           if (waits) {
-            const data = await gh.fetchIssueData(d);
+            const data = await dataOf(d);
             const labels = (data?.labels ?? []).map((l) => (typeof l === 'string' ? l : l?.name));
             if (labels.includes(LABEL.취소) || parseKind(data?.body) === '조사') waits = false;
           }
@@ -313,6 +341,10 @@ export async function main(argv, env = process.env, deps = {}) {
     }
     for (const n of issues) {
       const state = states.get(n);
+      if (gh.fetchIssueData) {
+        const labels = ((await dataOf(n))?.labels ?? []).map((l) => (typeof l === 'string' ? l : l?.name));
+        if (labels.includes(DECISION_LABEL)) { decisionIssues.add(n); continue; }
+      }
       if (fresh) {
         const reports = gh.countReports ? await gh.countReports(n) : 0;
         // 재작업 한도(결정 2-1)는 리뷰어 판정을 받은 보고서로 센다. 판정 없는 보고서만 쌓여 끝없이 돌지 않게 전체 보고서 수에도 상한을 둔다(run-8).
@@ -321,15 +353,32 @@ export async function main(argv, env = process.env, deps = {}) {
         if (reviewed > operatorConfig.rejectLimit) { await gh.setState(n, LABEL.거부목록); blocked.add(n); rejectedOut.add(n); continue; }
         if (reports > cap || (noReport[n] ?? 0) > operatorConfig.noReportRetries) { await gh.setState(n, LABEL.막힘); blocked.add(n); continue; }
         if (waitsOn.has(n)) { await gh.setState(n, LABEL.대기); held.add(n); continue; }
+        // 사용자 결정(결정 8-44): 최근 거부에 [사용자 결정] 이유가 있으면 결정 이슈를 만들고(이미 만들었으면 그대로) 결정대기로 뺀다.
+        if (gh.fetchIssueData && gh.createIssue && gh.comment) {
+          const data = await dataOf(n);
+          const plan = decisionPlan(data?.comments ?? []);
+          if (plan.action === 'create') {
+            const numbers = [];
+            for (const [i, item] of plan.items.entries()) {
+              numbers.push(await gh.createIssue({
+                title: decisionIssueTitle({ origin: n, title: data?.title, index: i + 1, count: plan.items.length }),
+                body: decisionIssueBody({ origin: n, title: data?.title, item, verdictUrl: plan.verdictUrl }),
+                labels: [DECISION_LABEL],
+              }));
+            }
+            await gh.comment(n, decisionLinksComment(numbers));
+          }
+          if (plan.action !== 'none') { await gh.setState(n, LABEL.결정대기); awaiting.add(n); continue; }
+        }
         if (REDISPATCH_RESET.has(state)) await gh.setState(n, LABEL.진행중);
         before.set(n, reports);
       } else if (gh.ensureLabels && state === NO_LABEL) await gh.setState(n, LABEL.진행중);
     }
-    const live = issues.filter((n) => !blocked.has(n) && !held.has(n));
+    const live = issues.filter((n) => !blocked.has(n) && !held.has(n) && !awaiting.has(n) && !decisionIssues.has(n));
     for (const n of Object.keys(issueBases)) if (!live.includes(Number(n))) delete issueBases[n];
     // 시작 지점을 실제로 쓰는 이슈가 없으면 이 하달은 main에서 시작한 것이다(훅도 그 하달의 브랜치를 받지 않는다).
     if (Object.keys(issueBases).length === 0) base = null;
-    const excluded = issues.filter((n) => !live.includes(n)).map((n) => ({ issue: n, reason: held.has(n) ? LABEL.대기 : rejectedOut.has(n) ? LABEL.거부목록 : LABEL.막힘 }));
+    const excluded = issues.filter((n) => !live.includes(n)).map((n) => ({ issue: n, reason: held.has(n) ? LABEL.대기 : awaiting.has(n) ? LABEL.결정대기 : decisionIssues.has(n) ? DECISION_LABEL : rejectedOut.has(n) ? LABEL.거부목록 : LABEL.막힘 }));
     record.data = { ...record.data, base, issueBases, live, excluded };
     writeDispatch(run, handoff, record.data);
     // 결정 8-41: 넘긴 이슈의 본문·댓글을 지침에 미리 넣는다(오퍼레이터가 gh issue view를 이슈마다 여러 번 부르던 왕복을 없앤다, h16·h18).
@@ -338,7 +387,7 @@ export async function main(argv, env = process.env, deps = {}) {
       let block;
       try {
         if (!gh.fetchIssueData) throw new Error('no reader');
-        const data = await gh.fetchIssueData(n);
+        const data = await dataOf(n);
         const comments = (data?.comments ?? []).map((c) => `----- 댓글 (${c.author?.login ?? '?'}, ${c.createdAt ?? '?'}) -----\n${c.body ?? ''}`);
         block = [String(data?.body ?? ''), ...comments].join('\n\n');
       } catch {
@@ -382,10 +431,10 @@ export async function main(argv, env = process.env, deps = {}) {
 
     const rows = [];
     for (const n of issues) {
-      if (!blocked.has(n) && !held.has(n) && !exhausted.has(n)) continue;
+      if (!blocked.has(n) && !held.has(n) && !awaiting.has(n) && !exhausted.has(n)) continue;
       if (exhausted.has(n)) await gh.setState(n, LABEL.막힘);
       const { url } = await gh.fetchIssue(n);
-      rows.push({ number: n, state: held.has(n) ? LABEL.대기 : rejectedOut.has(n) ? LABEL.거부목록 : LABEL.막힘, url });
+      rows.push({ number: n, state: held.has(n) ? LABEL.대기 : awaiting.has(n) ? LABEL.결정대기 : rejectedOut.has(n) ? LABEL.거부목록 : LABEL.막힘, url });
     }
     if (!ok) {
       for (const n of live) {

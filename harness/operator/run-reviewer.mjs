@@ -41,7 +41,7 @@ import { execFileSync } from 'node:child_process';
 import { loadOperatorConfig, ConfigError } from './config.mjs';
 import { WORKER_TYPES } from './model-exec.mjs';
 import { askJevWithRetry, findJevKey, JevError, KEY_NAME } from './jev.mjs';
-import { issueCriteria, reportProblems, reportQuestions, proposalProblems, proposalQuestions, decide, probabilityTable } from './jev-review.mjs';
+import { issueCriteria, reportProblems, reportQuestions, proposalProblems, proposalQuestions, decide, probabilityTable, FIX_SELF } from './jev-review.mjs';
 import { normPath } from '../policy.mjs';
 import { REPORT_HEAD, VERDICT_ALLOW, VERDICT_REJECT, ALLOWED_COMMIT, REVIEWER_MODEL, WORKER_MODEL, ACTUAL_WORKER_MODEL, fieldLine } from './protocol.mjs';
 
@@ -183,7 +183,7 @@ const sha256Of = (buf) => createHash('sha256').update(buf).digest('hex');
 
 // 코드 검사를 통과했으면 Jev에 묻고 결정한다. 돌려주는 값: { verdict, reasons, table, model } 또는 { fail: [코드, 사유] }.
 async function judge({ problems, questions, state, ctx, cfg, env, run, deps }) {
-  if (problems.length > 0) return { verdict: '거부', reasons: problems.map((p) => `- ${p}`), table: null, model: '호출 안 함: 코드 검사에서 거부' };
+  if (problems.length > 0) return { verdict: '거부', reasons: problems.map((p) => (ctx.criteria !== undefined ? `- ${FIX_SELF} ${p}` : `- ${p}`)), table: null, model: '호출 안 함: 코드 검사에서 거부' };
   const found = deps.jevKey !== undefined ? (deps.jevKey ? { key: deps.jevKey } : null) : findJevKey({ env: { ...process.env, ...env }, run, harnessDir: fwd(dirname(dirname(fileURLToPath(import.meta.url)))) });
   if (!found) return { fail: [2, `${KEY_NAME}가 없습니다. 환경 변수나 실행 폴더의 .env에 넣으세요(값은 출력하지 않습니다).`] };
   let res;

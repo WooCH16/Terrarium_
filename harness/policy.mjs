@@ -13,7 +13,8 @@ const SECRET_PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
 ];
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
-const COORDINATOR_TOOLS = new Set(['Read', 'Grep', 'Glob', 'Agent', 'Task', 'TodoWrite', 'ToolSearch', 'Bash', 'Write', 'Edit', 'Skill']);
+// CronCreate·CronList·CronDelete: 사용자가 건 이슈 loop(coordinator-issue-loop)를 걸고 끈다(결정 8-44).
+const COORDINATOR_TOOLS = new Set(['Read', 'Grep', 'Glob', 'Agent', 'Task', 'TodoWrite', 'ToolSearch', 'Bash', 'Write', 'Edit', 'Skill', 'CronCreate', 'CronList', 'CronDelete']);
 // ADR 0004 결정 B: 리뷰어는 하위 에이전트가 아니라 별도 실행이다. 실행 명령은 OPERATOR_SCRIPTS의 run-reviewer.mjs(T6).
 const SPAWNABLE = { coordinator: new Set(['advisor']) };
 const GH_ISSUE_READ = new Set(['view', 'list']);
