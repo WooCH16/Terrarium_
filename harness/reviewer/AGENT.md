@@ -51,6 +51,13 @@
 - 예: For this criterion the report names a file and line, a test name, or a command with its result.
 - 아니오: For this criterion the report gives no location, or only a general statement such as "done" or "checked".
 
+### scope
+
+- 대상: 결과 보고서, 완료 기준 한 줄마다. 허용·거부를 바꾸지 않는다. 거부 이유에 `[스스로 고침]`(예·애매) 또는 `[사용자 결정]`(아니오)을 붙이는 데만 쓴다(결정 8-44)
+- 묻는 말: If this completion criterion is not met yet, could a worker meet it within the issue's own goal and criteria, without a decision the issue does not make? Criterion: "{기준}"
+- 예: The fix is clear from the issue: a bug, a missing test, a missing file or evidence, or one obvious way to do it.
+- 아니오: Meeting it needs the owner to decide: changing or widening the goal or criteria, or choosing between options the issue leaves open (the report's remaining problems or worker questions say so).
+
 ### decidable
 
 - 대상: 제안문, 작업 단위의 완료 기준 한 줄마다

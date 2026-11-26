@@ -20,7 +20,7 @@ import { sessionSettings, isStopped, assertPlain, killTree, pruneDeadPids } from
 import { defaultExec } from './run-operator.mjs';
 import { launcher, createObserver, modelMatches } from './model-exec.mjs';
 import { readSecret } from './env-file.mjs';
-import { RESULT_FIELDS } from './protocol.mjs';
+import { OWNER_DECISION_HEAD, RESULT_FIELDS } from './protocol.mjs';
 
 const fwd = (p) => String(p).replace(/\\/g, '/').replace(/\/+$/, '');
 const ONE_LINE = (text) => String(text).replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
@@ -268,7 +268,12 @@ export const WORKER_DOC = new URL('../worker/AGENT.md', import.meta.url);
 export const WORKER_SKILL = new URL('../worker/skills/worker-issue/SKILL.md', import.meta.url);
 const dropFrontmatter = (t) => t.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n(?:\r?\n)?/, '');
 export const workerDoc = () => `${readFileSync(WORKER_DOC, 'utf8').trimEnd()}\n\n${dropFrontmatter(readFileSync(WORKER_SKILL, 'utf8')).trimEnd()}`;
-export function inputText({ issue, worktree, body, failures, decisions = [] }, doc = workerDoc()) {
+// 사용자 결정(결정 8-44): 이슈의 `## 사용자 결정` 댓글만 워커에게 넘긴다(loop가 옮긴 것. 오퍼레이터 세션은 이 머리의 댓글을 올릴 수 없다).
+export const ownerDecisionsOf = (comments) => (Array.isArray(comments) ? comments : [])
+  .map((c) => c?.body).filter((b) => typeof b === 'string' && b.startsWith(OWNER_DECISION_HEAD))
+  .map((b) => b.slice(OWNER_DECISION_HEAD.length).trim()).filter(Boolean);
+
+export function inputText({ issue, worktree, body, failures, decisions = [], ownerDecisions = [] }, doc = workerDoc()) {
   const parts = [
     doc.trimEnd(),
     '',
@@ -283,6 +288,7 @@ export function inputText({ issue, worktree, body, failures, decisions = [] }, d
     '## 이슈 본문',
     body,
   ];
+  if (ownerDecisions.length) parts.push('', '## 소유자 결정', '이 이슈의 소유자가 정한 것이다. 본문과 어긋나면 이 결정을 따른다.', ...ownerDecisions.flatMap((d) => ['', d]));
   for (const d of decisions) parts.push('', '## 앞서 한 질문', d.question, '', '## 오퍼레이터 결정', d.answer);
   if (failures.length) parts.push('', '## 이전 실패 이유', ...failures.map((f) => `- ${f}`));
   parts.push('');
@@ -430,8 +436,13 @@ export async function main(argv, env = process.env, deps = {}) {
     else { try { baseCommit = git(memo, ['rev-parse', '--verify', `${base}^{commit}`]).trim(); } catch { return fail(`기준 브랜치 ${base}를 찾을 수 없습니다.`); } }
 
     // 이슈 본문은 신뢰하지 않는 데이터다: 파일로만 쓰고 명령줄·설정에 넣지 않는다.
-    const fetchBody = deps.fetchIssueBody ?? (async (n) => JSON.parse(defaultExec(env)('gh', ['issue', 'view', String(n), '--repo', config.designatedRepo, '--json', 'body'])).body);
+    let issueView = null;
+    const view = (n) => (issueView ??= JSON.parse(defaultExec(env)('gh', ['issue', 'view', String(n), '--repo', config.designatedRepo, '--json', 'body,comments'])));
+    const fetchBody = deps.fetchIssueBody ?? (async (n) => view(n).body);
     const body = await fetchBody(issue);
+    const fetchComments = deps.fetchIssueComments ?? (deps.fetchIssueBody ? async () => [] : async (n) => view(n).comments);
+    const ownerDecisions = ownerDecisionsOf(await fetchComments(issue));
+    if (Buffer.byteLength(ownerDecisions.join('\n')) > MAX_BODY_BYTES) return fail(`이슈 #${issue}의 사용자 결정 댓글이 너무 큽니다.`);
     if (typeof body !== 'string' || Buffer.byteLength(body) > MAX_BODY_BYTES) return fail(`이슈 #${issue}의 본문을 가져오지 못했거나 너무 큽니다.`);
 
     // 모델 선택(대체 표 순환). 공개 가능 표시(`공개 가능: 예`)는 publicOnly 모델(muse)로 대체할 때만 본다. 본문을 읽은 뒤에 고른다.
@@ -567,7 +578,7 @@ export async function main(argv, env = process.env, deps = {}) {
       rmSync(resultFile, { force: true });
       rmSync(`${worktree}/${QUESTION_REL}`, { force: true }); // 앞 시도·앞 질문의 파일은 이번 시도의 질문이 아니다
       rmSync(askFile, { force: true });
-      writeFileSync(promptFile, inputText({ issue, worktree, body, failures, decisions }));
+      writeFileSync(promptFile, inputText({ issue, worktree, body, failures, decisions, ownerDecisions }));
       let pid;
       let onSignal = null;
       let r;

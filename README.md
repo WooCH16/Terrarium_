@@ -27,10 +27,9 @@ Terrarium은 Claude Code 에이전트를 계층으로 나눠 일을 맡기는 �
 
 - **담는 것:** 작업 이슈, 어드바이저 제안문, 리뷰어 판정, 오퍼레이터 결과 보고서, 기록 문서(`records/`).
 - **비공개여야 하는 이유:** 지시 원문과 대상 프로젝트의 내용이 그대로 쌓입니다. 공개 저장소면 `setup`, `preflight`, 코디네이터가 멈추고 아무것도 쓰지 않습니다.
-- **혼자 씁니다:** 여러 사람이 한 저장소를 같이 쓰지 않습니다. 대상 프로젝트마다 따로 만드는 것이 좋습니다(같은 저장소를 다시 쓰면 기록이 어긋나 보입니다).
-- **만드는 방법(둘 중 하나):**
-  - 직접: `gh repo create <owner>/harness-issues --private`
-  - 설치할 때: `node harness/setup.mjs --run <실행 폴더> --create-repo` (`--repo`를 주지 않으면 로그인 계정의 `harness-issues`. 두 번째 대상 프로젝트부터는 `--repo`로 다른 이름을 줍니다). 저장소가 없을 때만 비공개로 만들고, 이미 공개인 저장소는 바꾸지 않고 멈춥니다. 앱의 설치 화면은 저장소가 없으면 만들지 묻습니다.
+- **혼자 씁니다:** 여러 사람이 한 저장소를 같이 쓰지 않습니다.
+- **직접 만들 필요가 없습니다:** 설치할 때 `--repo`를 주지 않으면 `<로그인 계정>/harness-issues-<대상 프로젝트 폴더 이름>`을 비공개로 알아서 만들고 이름을 알려 줍니다. 두 번째 프로젝트도 같습니다. 같은 폴더를 다시 설치하면 그 저장소를 다시 쓰고, 이미 공개인 저장소는 바꾸지 않고 멈춥니다.
+- **이름을 직접 정하려면:** `--repo <owner/name>`을 줍니다(없는 저장소면 `--create-repo`도 붙입니다). 앱의 설치 화면은 지금은 저장소 이름을 받고, 없으면 만들지 묻습니다.
 
 ## 쓰는 방법: 앱 버전과 Claude CLI 버전
 
@@ -87,15 +86,12 @@ npm run dist         # Windows 설치 파일: app/dist/Terrarium Setup <버전>.
 #    TYPESAFE_API_KEY=...      (필수, 리뷰어·라우팅)
 #    GEMINI_API_KEY=...        (gemini 워커를 쓸 때)
 
-# 2. 비공개 지정 저장소를 만들고 사전 점검
-gh repo create <owner>/harness-issues --private
-node harness/preflight.mjs --repo <owner>/harness-issues
-#    3번에서 --create-repo로 만들 거라면 저장소가 아직 없으니 --repo 없이 점검합니다
-#    node harness/preflight.mjs
+# 2. 사전 점검 (지정 저장소는 3번에서 알아서 만듭니다)
+node harness/preflight.mjs
 
 # 3. 실행 폴더 설치 (대상 프로젝트를 주지 않으면 시험용 메모 프로그램)
-node harness/setup.mjs --run C:/Users/<you>/my-run --repo <owner>/harness-issues --project C:/path/to/your/git/project
-#    2번에서 저장소를 만들지 않았다면 --create-repo를 붙입니다(없을 때만 비공개로 만듦)
+node harness/setup.mjs --run C:/Users/<you>/my-run --project C:/path/to/your/git/project
+#    지정 저장소 이름을 직접 정하려면 --repo <owner/name> [--create-repo]
 
 # 4. 실행: 실행 폴더에서 코디네이터를 띄웁니다(앱이 띄우는 것과 같은 설정)
 cd C:/Users/<you>/my-run

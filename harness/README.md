@@ -20,7 +20,7 @@
 | `operator/run-worker.mjs` | 워커 실행(ADR 0004 결정 A). 모델 값(`claude`, `gemini`, `muse`)별 실행 경로는 `operator.config.json`의 `runners`가 정합니다. 기본 설정은 세 모델 모두 Pi로 띄웁니다(ADR 0009): claude는 Pi의 Anthropic 계정 로그인, gemini는 `GEMINI_API_KEY`(환경 변수 또는 `.env`, `runners.gemini.secretEnv`), muse는 Pi 그대로. 이 경우 하네스 훅이 걸리는 워커가 없고 사후 검사·합치기 시험·Jev 리뷰어가 막습니다. Pi에 저장된 예전 키는 `.env`보다 먼저 쓰이므로 키를 바꿀 때는 `pi auth logout <제공사>`로 지웁니다 |
 | `policy.mjs`, `guard.mjs` | PreToolUse 훅. 코디네이터(`agent_type` 없음)에 허용 목록을 적용하고, 모든 역할에 비밀값·하네스 파일 보호를 적용합니다. advisor는 읽기, `reviewer-inbox/` 안 쓰기, 조언 판정 명령 하나만 됩니다(ADR 0006). 오류가 나면 막습니다 |
 | `preflight.mjs` | 사전 점검. 설치·실행에 필요한 도구, 워커 모델(1곳 이상), Jev 키를 확인합니다. `--target-repo`면 대상 저장소의 워크플로와 Actions의 PR 만들기 설정을 읽어 경고로 안내합니다(결정 8-32) |
-| `setup.mjs` | 실행 폴더를 만듭니다. 지정 저장소가 `PRIVATE`가 아니면 아무것도 쓰지 않고 종료 코드 2로 끝납니다. `--create-repo`는 지정 저장소가 없을 때만 `gh repo create <owner/name> --private`로 만들고 이어 갑니다(`--repo`가 없으면 `<로그인 계정>/harness-issues`이므로 두 번째 대상 프로젝트부터는 `--repo`로 다른 이름을 줌, 공개 저장소는 바꾸지 않음, `--refresh`·`--no-clone`과 함께 못 씀, 결정 8-28). `--advisor-stub`은 advisor 자리에 어드바이저 대역을 설치합니다. 리뷰어 전용 폴더 `reviewer-inbox/`도 만듭니다(`--refresh`로도 생깁니다) |
+| `setup.mjs` | 실행 폴더를 만듭니다. 지정 저장소가 `PRIVATE`가 아니면 아무것도 쓰지 않고 종료 코드 2로 끝납니다. `--repo`가 없으면 `<로그인 계정>/harness-issues-<대상 프로젝트 이름>`을 비공개로 만듭니다(같은 폴더면 다시 쓰고 이름만 같으면 `-2`, 결정 8-46). `--repo`로 이름을 준 저장소는 `--create-repo`가 있을 때만 만듭니다(결정 8-28). 공개 저장소는 바꾸지 않습니다. `--advisor-stub`은 advisor 자리에 어드바이저 대역을 설치합니다. 리뷰어 전용 폴더 `reviewer-inbox/`도 만듭니다(`--refresh`로도 생깁니다) |
 | `coordinator.config.json`, `config.mjs` | 코디네이터가 쓰는 수치(overview 8절의 시작값)와 워커 모델 허용 값(`claude`, `gemini`, `muse`). 오퍼레이터가 쓰는 값은 `operator/operator.config.json`에 있습니다 |
 | `stubs/` | 시험용 대역: 오퍼레이터 대역(`operator-stub.mjs`), 어드바이저 대역(`advisor-stub.md`, `proposals/`), 어드바이저 목록 예시 |
 | `fixtures/memo/` | 시험용 메모 프로그램(정렬 기능 없음) |
@@ -29,11 +29,10 @@
 ## 준비
 
 ```bash
-gh repo create <owner>/harness-issues --private   # 지정 저장소 (비공개)
-node harness/preflight.mjs --repo <owner>/harness-issues   # 사전 점검
-node harness/setup.mjs --run C:/Users/<you>/terrarium-run --repo <owner>/harness-issues [--project <대상 프로젝트 git 폴더>]
-# 또는 저장소를 만들지 않고 설치하면서 만든다(없을 때만 비공개로). 이때 사전 점검은 --repo 없이 한다
-node harness/setup.mjs --run C:/Users/<you>/terrarium-run --create-repo [--repo <owner>/harness-issues]
+node harness/preflight.mjs   # 사전 점검
+# 지정 저장소는 설치할 때 <로그인 계정>/harness-issues-<대상 프로젝트 이름>으로 알아서 비공개로 만든다
+node harness/setup.mjs --run C:/Users/<you>/terrarium-run [--project <대상 프로젝트 git 폴더>]
+# 이름을 직접 정하려면: --repo <owner/name> [--create-repo]
 ```
 
 사전 점검(`preflight.mjs`)은 node 22 이상, git, `gh` 설치와 로그인, 지정 저장소 비공개 여부, Claude Code, Pi와 워커 모델마다의 계정 준비(`pi auth check --model`), Jev 키(`TYPESAFE_API_KEY`)가 있는지를 보고, 쓸 수 있는 워커 모델이 없거나 키가 없으면 실패합니다. 리뷰어는 Jev라 워커 모델은 1곳이면 됩니다(결정 9-3 바뀜, ADR 0008). 다른 모델로 대체하려면 2곳 이상이 낫습니다. 실패한 항목마다 할 일을 알려 줍니다. `--json`은 같은 결과를 JSON으로 냅니다. CLI의 계정 로그인 여부까지는 보지 않습니다.
@@ -46,7 +45,7 @@ node harness/setup.mjs --run C:/Users/<you>/terrarium-run --create-repo [--repo 
 
 ```bash
 cd C:/Users/<you>/terrarium-run
-claude --setting-sources project,local --allowedTools "Bash Write Edit Read Glob Grep Agent TodoWrite Skill"
+claude --setting-sources project,local --allowedTools "Bash Write Edit Read Glob Grep Agent TodoWrite Skill CronCreate CronList CronDelete"
 ```
 
 - `--setting-sources project,local`: 사용자 전역 설정의 플러그인과 훅을 끕니다. 전역 `~/.claude/CLAUDE.md`·`~/.claude/rules/`와 실행 폴더 상위 폴더의 `CLAUDE.md`는 `setup`이 실행 폴더 설정에 넣는 `claudeMdExcludes`가 뺍니다(오퍼레이터·워커 세션도 같음). 조직이 배포한 관리 정책 `CLAUDE.md`는 뺄 수 없습니다.

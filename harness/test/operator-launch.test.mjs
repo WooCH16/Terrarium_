@@ -406,11 +406,11 @@ test('makeGhDeps.fetchIssue: 상태 라벨이 없으면 "라벨 없음", 둘 이
   await assert.rejects(() => two.fetchIssue(7), /상태 라벨/);
 });
 
-test('makeGhDeps.ensureLabels: 상태 라벨 9개와 취소 라벨을 gh label create --force로 만든다(멱등)', async () => {
+test('makeGhDeps.ensureLabels: 상태 라벨 10개와 취소·결정필요 라벨을 gh label create --force로 만든다(멱등)', async () => {
   const seen = [];
   await makeGhDeps('o/r', (bin, args) => { seen.push([bin, ...args]); return ''; }).ensureLabels();
-  assert.equal(seen.length, 10);
-  assert.deepEqual(seen.map((c) => c[3]).sort(), [...STATES, '취소'].sort());
+  assert.equal(seen.length, 12);
+  assert.deepEqual(seen.map((c) => c[3]).sort(), [...STATES, '취소', '결정필요'].sort());
   for (const c of seen) {
     assert.deepEqual(c.slice(0, 3), ['gh', 'label', 'create']);
     assert.ok(c.includes('--force') && c.includes('--repo') && c[c.indexOf('--repo') + 1] === 'o/r');

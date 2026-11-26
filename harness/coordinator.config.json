@@ -1,6 +1,6 @@
 {
   "workerModels": ["claude", "gemini", "muse"],
-  "reworkLimitPerIssue": 2,
+  "reworkLimitPerIssue": 5,
   "blockedIssuesReportThreshold": 3,
   "cancelledIssuesCleanupThreshold": 8,
   "preferenceProposalAtRepeat": 3,

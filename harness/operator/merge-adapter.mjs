@@ -40,7 +40,7 @@ export class HarnessError extends Error {}
 
 const labelNames = (labels) => (Array.isArray(labels) ? labels : []).map((l) => (typeof l === 'string' ? l : l?.name)).filter((n) => typeof n === 'string');
 // 반영됨 라벨은 제외 기준도 반영 표시도 아니다(작업 모드의 오퍼레이터가 아무 상태 라벨이나 붙일 수 있다). 반영 여부는 main의 조상인지로만 판단한다.
-const EXCLUDED_LABELS = new Set([LABEL.거부목록, LABEL.미완료, LABEL.막힘, LABEL.보류, LABEL.대기]);
+const EXCLUDED_LABELS = new Set([LABEL.거부목록, LABEL.미완료, LABEL.막힘, LABEL.보류, LABEL.대기, LABEL.결정대기]);
 
 // 제로폭·형식 문자(\p{Cf})를 지우고 NFKC로 정규화한 줄: 판정처럼 보이는 줄을 느슨하게 알아보는 데만 쓴다.
 const loose = (line) => String(line).replace(/\p{Cf}/gu, '').normalize('NFKC');
@@ -862,7 +862,7 @@ export function normalizeRestComments(raw) {
 // 이슈 본문·라벨은 gh issue view로, 댓글은 REST(gh api --paginate)로 가져온다(issue view의 댓글에는 수정 시각이 없다). exec(bin, args)는 stdout 문자열.
 export function makeFetchIssueData(exec, repo) {
   return async (n) => {
-    const view = JSON.parse(exec('gh', ['issue', 'view', String(n), '--repo', repo, '--json', 'number,state,labels,body,url']));
+    const view = JSON.parse(exec('gh', ['issue', 'view', String(n), '--repo', repo, '--json', 'number,title,state,labels,body,url']));
     const comments = normalizeRestComments(parsePaginated(exec('gh', ['api', `repos/${repo}/issues/${n}/comments?per_page=100`, '--paginate'])));
     const t = (c) => Date.parse(c.createdAt);
     comments.sort((a, b) => (t(a) - t(b)) || (Number(a.id) - Number(b.id)) || 0);

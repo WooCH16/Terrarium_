@@ -155,12 +155,14 @@ test('재작업(2-3): 허용됐지만 반영하지 않은 이슈를 새 하달�
   assert.equal(git(f.memo, 'show', 'refs/heads/main:feature7.txt'), 'new');
 });
 
-test('재작업 한도: 결과 보고서가 rejectLimit+1(3)개면 다시 하달해도 거부목록으로 두고 세션에 넘기지 않는다(모아서 보고, 종료 코드 1)', T, async () => {
+const reports = (sha, n) => Array.from({ length: n }, () => reportOf(sha));
+
+test('재작업 한도: 결과 보고서가 rejectLimit+1(6)개면 다시 하달해도 거부목록으로 두고 세션에 넘기지 않는다(모아서 보고, 종료 코드 1)', T, async () => {
   const f = fixture();
   const sha = 'a'.repeat(40);
   const repo = fakeRepo({
-    7: { label: '미완료', comments: [reportOf(sha), reportOf(sha), reportOf(sha)] }, // 첫 결과 + 재작업 2회
-    8: { label: '미완료', comments: [reportOf(sha), reportOf(sha)] }, // 첫 결과 + 재작업 1회: 한 번 더 할 수 있다
+    7: { label: '미완료', comments: reports(sha, 6) }, // 첫 결과 + 재작업 5회(결정 8-44)
+    8: { label: '미완료', comments: reports(sha, 5) }, // 첫 결과 + 재작업 4회: 한 번 더 할 수 있다
   });
   const launched = [];
   const d = await dispatch(f, repo, [7, 8], launched);
@@ -174,7 +176,7 @@ test('재작업 한도: 결과 보고서가 rejectLimit+1(3)개면 다시 하달
 test('재작업 한도: 모든 이슈가 한도를 넘으면 세션을 띄우지 않고 거부목록만 보고한다', T, async () => {
   const f = fixture();
   const sha = 'b'.repeat(40);
-  const repo = fakeRepo({ 9: { label: '허용됨', comments: [reportOf(sha), allowOf(sha), reportOf(sha), reportOf(sha)] } });
+  const repo = fakeRepo({ 9: { label: '허용됨', comments: [reportOf(sha), allowOf(sha), ...reports(sha, 5)] } });
   const launched = [];
   const d = await dispatch(f, repo, [9], launched);
   assert.equal(d.code, 1);
@@ -188,7 +190,7 @@ test('결과 없음 재하달(2-4): 보고서 없이 보류된 이슈는 다시 
   const sha = 'c'.repeat(40);
   const repo = fakeRepo({
     7: { label: '보류', comments: [] },
-    8: { label: '보류', comments: [reportOf(sha), reportOf(sha), reportOf(sha)] }, // 보고서가 이미 한도만큼 있으면 결과 없음 재하달이라도 막힌다
+    8: { label: '보류', comments: reports(sha, 6) }, // 보고서가 이미 한도만큼 있으면 결과 없음 재하달이라도 막힌다
   });
   const launched = [];
   const d = await dispatch(f, repo, [7, 8], launched);

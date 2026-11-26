@@ -1,6 +1,7 @@
-// 실행 폴더를 만든다: node setup.mjs --run <dir> (--repo <owner/name> | --create-repo) [--project <git 폴더>] [--no-clone | --refresh] [--advisor-stub]
-//   --create-repo: 지정 저장소가 없으면 비공개로 만든다(결정 8-28). 이 깃발이 만들기 동의다. --repo가 없으면 <로그인 계정>/harness-issues.
+// 실행 폴더를 만든다: node setup.mjs --run <dir> [--repo <owner/name> [--create-repo]] [--project <git 폴더>] [--no-clone | --refresh] [--advisor-stub]
+//   --create-repo: 지정 저장소가 없으면 비공개로 만든다(결정 8-28). 이 깃발이 만들기 동의다(--repo로 이름을 준 때).
 //                  이미 있으면 만들지 않는다. 공개 저장소를 비공개로 바꾸거나 지우지 않는다. --no-clone·--refresh와 함께 쓸 수 없다
+//   --repo가 없으면(결정 8-46): <로그인 계정>/harness-issues-<대상 프로젝트 이름>을 묻지 않고 비공개로 만든다. 같은 폴더면 다시 쓰고, 이름만 같으면 -2를 붙인다
 //   --project: 대상 프로젝트로 쓸 로컬 git 저장소(main 브랜치 필요). 실행 폴더에 복제하고 원래 저장소와의 연결(origin)은 끊는다.
 //              없으면 시험용 메모 프로그램(fixtures/memo)을 쓴다
 //   --no-clone: 지정 저장소에 접속하지 않고 빈 저장소로 클론 자리를 만든다(시험용)
@@ -16,6 +17,7 @@
 // HARNESS_GH_BIN은 시험용이다(gh 대신 쓸 실행 파일 또는 .mjs 스크립트).
 import { mkdirSync, existsSync, readdirSync, readFileSync, writeFileSync, cpSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline/promises';
 import { addWorkflowsPr } from './github-workflows.mjs';
 import { execFileSync } from 'node:child_process';
@@ -55,7 +57,7 @@ const addWorkflows = process.argv.includes('--add-workflows');
 const noWorkflows = process.argv.includes('--no-workflows');
 const testCommand = arg('--test-command') ?? 'npm test';
 const ciWorkflow = arg('--ci-workflow');
-const USAGE = 'usage: node setup.mjs --run <dir> (--repo <owner/name> | --create-repo) [--project <git 폴더>] [--no-clone | --refresh] [--advisor-stub] [--target-repo <owner/name> [--target-remote <주소>] [--add-workflows | --no-workflows] [--test-command <명령>] [--ci-workflow <파일.yml>]]';
+const USAGE = 'usage: node setup.mjs --run <dir> [--repo <owner/name> [--create-repo]] [--project <git 폴더>] [--no-clone | --refresh] [--advisor-stub] [--target-repo <owner/name> [--target-remote <주소>] [--add-workflows | --no-workflows] [--test-command <명령>] [--ci-workflow <파일.yml>]]';
 const VALUE_FLAGS = ['--project', '--target-repo', '--target-remote', '--test-command', '--ci-workflow'];
 if (!runArg || VALUE_FLAGS.some((f) => process.argv.includes(f) && (arg(f) === undefined || arg(f).startsWith('--')))) {
   console.error(USAGE);
@@ -69,17 +71,19 @@ if (createRepo && (refresh || noClone)) {
 // 지정 저장소 이름은 owner/name 한 꼴만 받는다. `--repo undefined`가 harness.json을 덮은 일이 있었다(run-18).
 const REPO_FORMAT = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const validRepo = (v) => typeof v === 'string' && REPO_FORMAT.test(v) && !/\.git$/i.test(v);
-// --create-repo에 --repo가 없으면 로그인 계정의 harness-issues를 쓴다. 이 이름도 아래 형식 검사를 그대로 받는다.
-if (createRepo && !process.argv.includes('--repo')) {
-  let login = '';
-  try { login = gh(['api', 'user', '--jq', '.login']).trim(); } catch (e) { stop(`로그인 계정을 읽지 못해 기본 지정 저장소 이름을 정할 수 없다. --repo <owner/name>을 주거나 gh auth login을 하라. 아무것도 쓰지 않고 멈춘다: ${String(e.message).split('\n')[0]}`); }
-  repo = `${login}/harness-issues`;
-}
-if (!validRepo(repo)) {
+const checkRepo = () => {
+  if (validRepo(repo)) return;
   console.error(USAGE);
   console.error(`--repo 값 ${repo === undefined ? '(없음)' : JSON.stringify(repo)}은 owner/name 형식이 아니다(영문자·숫자·-_. 만, 빗금 하나, 양쪽 비어 있지 않음, .git 끝 없음). 아무것도 쓰지 않고 멈춘다.`);
   process.exit(1);
+};
+// --repo가 없으면(결정 8-46): --refresh는 실행 폴더에 적힌 저장소를 읽고, 처음 설치는 아래에서 대상 프로젝트 이름으로 짓는다.
+// --no-clone은 저장소에 접속하지 않으므로 이름을 지을 수 없어 --repo가 필요하다. 값 없는 --repo는 늘 오류다.
+const autoRepo = !process.argv.includes('--repo') && !noClone && !refresh;
+if (!process.argv.includes('--repo') && refresh && runArg && existsSync(`${fwd(runArg)}/harness.json`)) {
+  try { repo = JSON.parse(readFileSync(`${fwd(runArg)}/harness.json`, 'utf8')).designatedRepo; } catch { /* 아래 형식 검사가 멈춘다 */ }
 }
+if (!autoRepo) checkRepo();
 // 대상 저장소(결정 8-32): owner/name 한 꼴. 주소는 공백·줄바꿈·앞 붙임표가 없어야 한다(git 인자로 넘긴다).
 const usageStop = (why) => { console.error(USAGE); console.error(`${why} 아무것도 쓰지 않고 멈춘다.`); process.exit(1); };
 if (addWorkflows && noWorkflows) usageStop('--add-workflows와 --no-workflows는 함께 쓸 수 없다.');
@@ -119,6 +123,31 @@ if (projectArg) {
 // 1. 아무것도 쓰기 전에 지정 저장소가 비공개인지 확인한다. 확인하지 못해도 막는다(닫힌 쪽).
 //    --create-repo가 있고 gh가 "찾을 수 없다"고 답했을 때만 비공개로 만들고 다시 확인한다(결정 8-28). 다른 실패는 만들지 않고 멈춘다.
 const NOT_FOUND = /Could not resolve to a Repository/i;
+// 이름 짓기(결정 8-46): <로그인 계정>/harness-issues-<대상 프로젝트 이름>. 만든 저장소의 설명에는 대상 폴더 경로의 해시를 적는다(경로 자체는 적지 않는다).
+// 그 해시가 같으면 같은 폴더를 다시 설치하는 것이라 그 저장소를 쓰고, 이름만 같으면 -2, -3을 붙인다(기록이 섞이지 않게). 공개 저장소면 멈춘다.
+if (autoRepo) {
+  let login = '';
+  try { login = gh(['api', 'user', '--jq', '.login']).trim(); } catch (e) { stop(`로그인 계정을 읽지 못해 지정 저장소 이름을 정할 수 없다. --repo <owner/name>을 주거나 gh auth login을 하라. 아무것도 쓰지 않고 멈춘다: ${String(e.message).split('\n')[0]}`); }
+  const base = `harness-issues-${project.name.replace(/\.git$/i, '')}`.slice(0, 96);
+  const key = project.source ? resolve(project.source) : `example:${project.name}`;
+  const marker = `terrarium-harness:${createHash('sha256').update(process.platform === 'win32' ? key.toLowerCase() : key).digest('hex').slice(0, 16)}`;
+  for (let i = 1; ; i++) {
+    repo = `${login}/${i === 1 ? base : `${base}-${i}`}`;
+    checkRepo();
+    let found;
+    try {
+      found = JSON.parse(gh(['repo', 'view', repo, '--json', 'visibility,description']));
+    } catch (e) {
+      if (!NOT_FOUND.test(`${e.stderr ?? ''}\n${e.message ?? ''}`)) stop(`지정 저장소의 공개 여부를 확인하지 못해 아무것도 쓰지 않고 멈춘다: ${String(e.message).split('\n')[0]}`);
+      try { gh(['repo', 'create', repo, '--private', '--description', marker]); } catch (e2) { stop(`지정 저장소 ${repo}를 만들지 못해 아무것도 쓰지 않고 멈춘다: ${String(e2.message).split('\n')[0]}`); }
+      console.log(`지정 저장소를 비공개로 만들었다: ${repo}`);
+      break;
+    }
+    if (found.visibility !== 'PRIVATE') stop(`지정 저장소 ${repo}가 PRIVATE가 아니다(${JSON.stringify(found.visibility)}). 아무것도 쓰지 않고 멈춘다. --repo로 비공개 저장소를 지정하라.`);
+    if (found.description === marker) { console.log(`있는 저장소를 씁니다: ${repo}`); break; }
+    if (i >= 20) stop(`${login}/${base}부터 20개 이름이 모두 쓰이고 있다. --repo <owner/name>을 주라. 아무것도 쓰지 않고 멈춘다.`);
+  }
+}
 if (!noClone && !refresh) {
   const view = () => gh(['repo', 'view', repo, '--json', 'visibility', '-q', '.visibility']).trim();
   let visibility;
@@ -175,7 +204,7 @@ for (const role of ['coordinator', 'advisor']) {
   }
 }
 roleFiles.set('.claude/settings.json', JSON.stringify({
-  permissions: { allow: ['Bash', 'Write', 'Edit', 'Read', 'Glob', 'Grep', 'Agent', 'TodoWrite', 'Skill'] },
+  permissions: { allow: ['Bash', 'Write', 'Edit', 'Read', 'Glob', 'Grep', 'Agent', 'TodoWrite', 'Skill', 'CronCreate', 'CronList', 'CronDelete'] },
   hooks: {
     PreToolUse: [{
       matcher: '*',
@@ -203,7 +232,7 @@ mkdirSync(`${run}/handoffs`, { recursive: true });
 mkdirSync(`${run}/reviewer-inbox`, { recursive: true }); // 리뷰어 전용 폴더(ADR 0006): 어드바이저가 제안문을 쓰고 run-reviewer --advice가 읽는다
 for (const [name, text] of roleFiles) { mkdirSync(dirname(`${run}/${name}`), { recursive: true }); writeFileSync(`${run}/${name}`, text); }
 
-const NEXT = `cd "${run}" && claude --setting-sources project,local --allowedTools "Bash Write Edit Read Glob Grep Agent TodoWrite Skill"`;
+const NEXT = `cd "${run}" && claude --setting-sources project,local --allowedTools "Bash Write Edit Read Glob Grep Agent TodoWrite Skill CronCreate CronList CronDelete"`;
 if (refresh) {
   console.log(`역할 파일 갱신 완료: ${run}`);
   console.log(`다시 쓴 파일: ${[...roleFiles.keys()].join(', ')}`);

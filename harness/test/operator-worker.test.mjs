@@ -989,3 +989,21 @@ test('Pi 워커는 --no-extensions 그대로 하네스의 pi-ask.js 하나만 -e
   assert.equal(a.argv[i + 1].replace(/\\/g, '/'), `${realHarness}/worker/pi-ask.js`);
   assert.ok(a.argv.includes('--no-extensions'));
 });
+
+test('결정 8-44: `## 사용자 결정` 댓글은 워커 입력에 붙고, 다른 댓글은 붙지 않는다', T, async () => {
+  const s = setup();
+  const r = await exec(s, ARGS, { fetchIssueComments: async () => [{ body: '## 결과 보고서\nREPORT-MARK' }, { body: '## 사용자 결정\n- 결정 이슈: #100\n파랑으로 한다' }, { body: '그냥 댓글 CHAT-MARK' }] });
+  assert.equal(r.code, 0, r.err.join('\n'));
+  const [a] = s.attempts();
+  const part = a.input.split('\n## 소유자 결정\n')[1];
+  assert.ok(part, '입력에 사용자 결정 절이 있다');
+  assert.match(part, /본문과 어긋나면 이 결정을 따른다/);
+  assert.match(part, /파랑으로 한다/);
+  assert.doesNotMatch(a.input, /REPORT-MARK|CHAT-MARK/);
+});
+
+test('결정 8-44: 사용자 결정이 없으면 워커 입력에 그 절이 없다', T, async () => {
+  const s = setup();
+  assert.equal((await exec(s, ARGS)).code, 0);
+  assert.doesNotMatch(s.attempts()[0].input, /^## 소유자 결정$/m);
+});

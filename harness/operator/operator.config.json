@@ -17,7 +17,7 @@
   },
   "fallback": { "claude": "gemini", "gemini": "muse", "muse": "claude" },
   "workerRetries": 2,
-  "rejectLimit": 2,
+  "rejectLimit": 5,
   "noReportRetries": 2,
   "sessionRestarts": 1,
   "ci": { "mergeQueue": "local", "cacheKey": [], "excludeTests": ["smoke", "orchestra"] },

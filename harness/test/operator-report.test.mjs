@@ -4,16 +4,16 @@ import { STATES, ENSURED_LABELS, CANCEL_LABEL, formatLine, formatReport, exitCod
 
 const URL = 'https://github.com/o/r/pull/7';
 
-test('STATES는 라벨 9개를 정해진 순서로 담고 얼어 있다', () => {
-  assert.deepEqual([...STATES], ['진행중', '리뷰대기', '허용됨', '미완료', '막힘', '거부목록', '보류', '반영됨', '대기']);
-  assert.equal(STATES.length, 9);
+test('STATES는 라벨 10개를 정해진 순서로 담고 얼어 있다', () => {
+  assert.deepEqual([...STATES], ['진행중', '리뷰대기', '허용됨', '미완료', '막힘', '거부목록', '보류', '반영됨', '대기', '결정대기']);
+  assert.equal(STATES.length, 10);
   assert.ok(Object.isFrozen(STATES));
 });
 
 test('취소 라벨은 상태가 아니고, 미리 만드는 라벨 목록에만 든다(소유자 결정 8-1)', () => {
   assert.equal(CANCEL_LABEL, '취소');
   assert.ok(!STATES.includes(CANCEL_LABEL));
-  assert.deepEqual([...ENSURED_LABELS], [...STATES, CANCEL_LABEL]);
+  assert.deepEqual([...ENSURED_LABELS], [...STATES, CANCEL_LABEL, '결정필요']);
   assert.ok(Object.isFrozen(ENSURED_LABELS));
 });
 
